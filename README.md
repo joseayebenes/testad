@@ -83,8 +83,20 @@ Interfaz NiceGUI (Python puro) para navegar y editar el modelo:
 
 ```bash
 pip install -r requirements.txt
-python3 -m web.app --folder tests/data     # http://localhost:8080
+python3 -m web.app --import-xml tests/data --json project_json   # http://localhost:8080
+# o, si ya hay un proyecto JSON guardado:
+python3 -m web.app --json project_json
 ```
+
+### Flujo de trabajo (XML una vez → JSON)
+
+El XML se **importa una sola vez**; a partir de ahí se trabaja contra JSON:
+
+1. **Importar** — carga los `.module`/`.xmi`/`.xml` de una carpeta y los
+   guarda como proyecto JSON. Solo se hace la primera vez.
+2. **Abrir** — carga el proyecto desde su carpeta JSON (modo normal).
+3. **Guardar** — persiste los cambios en el JSON del proyecto (el botón se
+   resalta cuando hay cambios sin guardar).
 
 Pantalla: barra superior (cargar carpeta · guardar JSON · estado con
 errores/avisos) · árbol de módulos con expansión perezosa y búsqueda ·

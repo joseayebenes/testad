@@ -65,6 +65,7 @@ class ICDApp:
         # refs a componentes que se refrescan
         self.tree: Optional[ui.tree] = None
         self.status_label: Optional[ui.label] = None
+        self.save_btn: Optional[ui.button] = None
         self.detail_view = None  # ui.refreshable, creado en build()
 
     # ================================================================== #
@@ -528,42 +529,72 @@ class ICDApp:
         if s.dirty:
             text += "  · cambios sin guardar"
         self.status_label.set_text(text)
+        # el botón Guardar resalta cuando hay cambios pendientes
+        if self.save_btn is not None:
+            self.save_btn.props(f"color={'orange' if s.dirty else 'primary'}")
+            self.save_btn.set_text("Guardar *" if s.dirty else "Guardar")
 
-    def _do_load(self, folder: str) -> None:
-        if not folder:
-            ui.notify("Indica una carpeta", type="warning")
-            return
-        self.session.load_folder(folder)
+    def _reload_tree(self, message: str) -> None:
         if self.session.load_errors:
             ui.notify(f"{len(self.session.load_errors)} ficheros con error", type="warning")
         self.tree.props["nodes"] = self._root_nodes()
         self.tree.props["expanded"] = []
         self.tree.update()
         self.selected = None
+        self._collapsed_entity = None
         self._render_detail()
         self._refresh_status()
-        ui.notify("Carga completada", type="positive")
+        ui.notify(message, type="positive")
 
-    def _do_save(self, folder: str) -> None:
+    def _open_json(self, folder: str) -> None:
+        """Abrir un proyecto guardado en JSON (modo de trabajo normal)."""
+        if not folder:
+            ui.notify("Indica la carpeta del proyecto JSON", type="warning")
+            return
+        self.session.open_json(folder)
+        if not self.session.modules and not self.session.load_errors:
+            ui.notify(f"No hay .json en '{folder}'. ¿Importar XML primero?", type="warning")
+        self._reload_tree(f"Proyecto abierto desde {folder}")
+
+    def _import_xml(self, xml_folder: str, json_folder: str) -> None:
+        """Importar XML (una vez) y persistirlo como proyecto JSON."""
+        if not xml_folder or not json_folder:
+            ui.notify("Indica la carpeta XML y la de proyecto JSON", type="warning")
+            return
+        written = self.session.import_xml(xml_folder, json_folder)
+        self._reload_tree(f"XML importado y guardado como JSON ({len(written)} módulos) en {json_folder}")
+
+    def _save(self) -> None:
         if not self.session.modules:
             ui.notify("No hay nada que guardar", type="warning")
             return
-        written = self.session.save_all_json(folder or "output_json")
+        if not self.session.project_dir:
+            ui.notify("Abre o importa un proyecto antes de guardar", type="warning")
+            return
+        written = self.session.save_project()
         self._refresh_status()
-        ui.notify(f"Guardados {len(written)} módulos en JSON", type="positive")
+        ui.notify(f"Guardados {len(written)} módulos en {self.session.project_dir}", type="positive")
 
     # ================================================================== #
     # Montaje de la página
     # ================================================================== #
     def build(self) -> None:
-        with ui.header().classes("items-center gap-3"):
+        with ui.header().classes("items-center gap-2"):
             ui.label("ICDMS").classes("text-h6")
-            folder_in = ui.input("carpeta ICD", value="tests/data").props("dense dark").classes("w-64")
-            ui.button("Cargar", icon="folder_open",
-                      on_click=lambda: self._do_load(folder_in.value)).props("dense")
-            save_in = ui.input("carpeta salida", value="output_json").props("dense dark").classes("w-48")
-            ui.button("Guardar JSON", icon="save",
-                      on_click=lambda: self._do_save(save_in.value)).props("dense")
+            # --- proyecto JSON: abrir y guardar (modo de trabajo normal) ---
+            proj_in = ui.input("proyecto (JSON)", value="project_json") \
+                .props("dense dark").classes("w-48")
+            ui.button("Abrir", icon="folder_open",
+                      on_click=lambda: self._open_json(proj_in.value)).props("dense")
+            self.save_btn = ui.button("Guardar", icon="save", on_click=lambda: self._save()) \
+                .props("dense")
+            ui.separator().props("vertical dark")
+            # --- importar XML (una sola vez) -> se guarda como JSON ---
+            xml_in = ui.input("importar XML", value="tests/data") \
+                .props("dense dark").classes("w-40")
+            ui.button("Importar", icon="upload_file",
+                      on_click=lambda: self._import_xml(xml_in.value, proj_in.value)) \
+                .props("dense outline").tooltip("Cargar XML una vez y guardarlo como JSON de proyecto")
             ui.space()
             self.status_label = ui.label("").classes("text-sm")
 
@@ -601,10 +632,13 @@ class ICDApp:
         self._refresh_status()
 
 
-def create_app(initial_folder: Optional[str] = None) -> WorkSession:
+def create_app(json_folder: Optional[str] = None, xml_folder: Optional[str] = None) -> WorkSession:
     session = WorkSession()
-    if initial_folder:
-        session.load_folder(initial_folder)
+    # Al iniciar: abrir el proyecto JSON si existe; si no, importar el XML.
+    if json_folder:
+        session.open_json(json_folder)
+    if not session.modules and xml_folder:
+        session.import_xml(xml_folder, json_folder or "project_json")
 
     @ui.page("/")
     def index() -> None:
@@ -620,11 +654,12 @@ def create_app(initial_folder: Optional[str] = None) -> WorkSession:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Interfaz web para ICDs (NiceGUI).")
-    parser.add_argument("--folder", help="carpeta a cargar al iniciar")
+    parser.add_argument("--json", help="carpeta de proyecto JSON a abrir al iniciar")
+    parser.add_argument("--import-xml", dest="xml", help="carpeta XML a importar si no hay JSON")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
 
-    create_app(args.folder)
+    create_app(args.json, args.xml)
     ui.run(port=args.port, title="ICDMS", reload=False, show=False)
 
 

@@ -59,6 +59,9 @@ class WorkSession:
         # id -> entidad, para localizar rápido desde el árbol de la UI.
         self._index: Dict[str, Entity] = {}
         self.dirty = False
+        # Carpeta del proyecto JSON (donde se guarda/abre). El XML solo se
+        # importa una vez; a partir de ahí se trabaja contra este JSON.
+        self.project_dir = ""
 
     # ------------------------------------------------------------------ #
     # Carga
@@ -86,6 +89,28 @@ class WorkSession:
             except Exception as exc:  # noqa: BLE001
                 self.load_errors.append(f"{os.path.basename(path)}: {exc}")
         self._finish_load()
+
+    def open_json(self, folder: str) -> None:
+        """Abre un proyecto: carga todos los .json de la carpeta (modo normal)."""
+        paths = sorted(glob.glob(os.path.join(folder, "*.json")))
+        self.load_json_files(paths)
+        self.project_dir = folder
+
+    def import_xml(self, xml_folder: str, json_folder: str) -> List[str]:
+        """Importa XML (una sola vez) y lo persiste como JSON de proyecto.
+
+        A partir de aquí el trabajo continúa sobre el JSON: abrir/guardar.
+        """
+        self.load_folder(xml_folder)
+        written = self.save_all_json(json_folder)
+        self.project_dir = json_folder
+        return written
+
+    def save_project(self) -> List[str]:
+        """Guarda todos los módulos en la carpeta de proyecto JSON."""
+        if not self.project_dir:
+            raise ValueError("No hay carpeta de proyecto definida")
+        return self.save_all_json(self.project_dir)
 
     def _finish_load(self) -> None:
         report = self.registry.resolve_references()

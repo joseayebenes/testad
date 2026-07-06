@@ -149,6 +149,32 @@ def test_cross_module_reference_sets_file():
     assert field.ref.file == "BaseSignals.xmi"        # referencia entre archivos
 
 
+def test_import_xml_then_work_from_json():
+    """Flujo: importar XML una vez -> JSON -> editar -> guardar -> reabrir."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        s = WorkSession()
+        written = s.import_xml(DATA_DIR, tmp)     # XML -> JSON de proyecto
+        assert len(written) >= 3
+        assert s.project_dir == tmp
+        assert not s.dirty                        # recién guardado
+
+        # editar y guardar en el proyecto
+        speed = s.registry.get_module("FCS_ICD").find_one(ScalarType, "AirSpeed")
+        speed.bit_length = 99
+        s.dirty = True
+        s.save_project()
+        assert not s.dirty
+
+        # reabrir SOLO desde JSON (sin tocar el XML) y comprobar que persiste
+        s2 = WorkSession()
+        s2.open_json(tmp)
+        assert s2.project_dir == tmp
+        assert s2.registry.get_module("FCS_ICD") is not None
+        reopened = s2.registry.get_module("FCS_ICD").find_one(ScalarType, "AirSpeed")
+        assert reopened.bit_length == 99
+
+
 def _run_all():
     failures = 0
     for name, fn in sorted(globals().items()):
