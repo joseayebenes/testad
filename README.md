@@ -20,7 +20,8 @@ metadato del XML (namespaces, atributos crudos, xsi:types...).
 main.py          CLI: carga todos los ICD de una carpeta y muestra resultados
 web/
   session.py     Estado de una sesión de trabajo (envuelve core/, sin UI)
-  app.py         Interfaz web NiceGUI: árbol, editor, validación
+  views.py       Lógica de los visores (mensaje aplanado, decodificación de tipo)
+  app.py         Interfaz web NiceGUI: árbol, editor, visores, validación
 core/
   model.py       Modelo de dominio (sistema de tipos + transmisión + organización)
   parser.py      Traductor XMI -> modelo (stdlib xml.etree, sin dependencias)
@@ -33,6 +34,7 @@ tests/
   test_validation.py
   test_persistence.py
   test_session.py     lógica de edición de la web (crear/borrar/referencias)
+  test_views.py       lógica de los visores de mensaje y de tipo
 ```
 
 ## El modelo
@@ -98,6 +100,16 @@ Edición estructural:
 * **Borrar** entidades; se avisa de las referencias que quedan colgando.
 * **Editar referencias** (`with`, payload...) con un selector de búsqueda
   que enlaza incluso entre módulos distintos.
+
+Visores (`web/views.py`):
+
+* **Visor de mensaje** — muestra el mensaje completo aplanado en una tabla:
+  cada campo con su posición física, bits, tipo, codificación, escalado,
+  condición y origen (referencia local, entre archivos o inline). Desciende
+  por las subestructuras anidadas.
+* **Visor de tipo** — muestra cómo se decodifica un tipo: propiedades
+  (bits, codificación, contador de array, discriminador...) y el escalado
+  detallado —fórmula lineal, tabla de estados (enum) o tramos (LUT)—.
 
 La lógica vive en `web/session.py` (`WorkSession`), que envuelve `core/`
 sin depender de NiceGUI, así que es testeable sin navegador.

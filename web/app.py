@@ -26,9 +26,10 @@ from nicegui import ui
 
 from core.model import (
     Bus, CompositeType, Entity, Field, Message, MessageSlot, Module,
-    Network, Port, Reference, ScalarType,
+    Network, Port, Reference, ScalarType, TypeDef,
 )
 from web.session import WorkSession
+from web import views
 
 # Atributos que nunca se muestran/editan en la ficha (navegación interna).
 _HIDDEN_ATTRS = {"parent"}
@@ -171,12 +172,15 @@ class ICDApp:
                     ui.label("Referencias").classes("text-bold")
                     self._render_references(entity)
 
-            # --- layout / describe ---
-            describe = getattr(entity, "describe", None)
-            if callable(describe):
+            # --- visor específico según el tipo de entidad ---
+            if isinstance(entity, Message):
+                self._message_viewer(entity)
+            elif isinstance(entity, TypeDef):
+                self._type_viewer(entity)
+            elif callable(getattr(entity, "describe", None)):
                 with ui.card().classes("w-full"):
                     ui.label("Layout").classes("text-bold")
-                    ui.code(describe()).classes("w-full").style("white-space:pre-wrap")
+                    ui.code(entity.describe()).classes("w-full").style("white-space:pre-wrap")
 
             # --- incidencias de esta entidad ---
             issues = self.session.issues_for(entity)
@@ -237,6 +241,71 @@ class ICDApp:
 
     def _root_nodes_keeping(self) -> list:
         return [self._make_shell(m) for m in self.session.modules]
+
+    def _message_viewer(self, message: Message) -> None:
+        """Visor de mensaje: el mensaje completo aplanado en una tabla."""
+        rows = [r.as_dict() for r in views.message_rows(message)]
+        with ui.card().classes("w-full"):
+            with ui.row().classes("items-center w-full"):
+                ui.label("Visor de mensaje").classes("text-bold")
+                ui.space()
+                st = message.structure
+                ui.label(f"{len(rows)} campos · payload: {st.name if st else '(sin resolver)'}") \
+                    .classes("text-sm text-grey")
+            if not rows:
+                ui.label("El mensaje no tiene payload resuelto.").classes("text-negative")
+                return
+            ui.table(columns=views.MESSAGE_COLUMNS, rows=rows, row_key="name") \
+                .classes("w-full").props("dense flat bordered wrap-cells")
+
+    def _type_viewer(self, typedef: TypeDef) -> None:
+        """Visor de tipo: cómo se decodifica (propiedades + escalado + campos)."""
+        view = views.type_view(typedef)
+        with ui.card().classes("w-full"):
+            ui.label(f"Visor de tipo · {view['kind']}").classes("text-bold")
+
+            # propiedades de decodificación
+            if view["props"]:
+                ui.table(
+                    columns=[{"name": "prop", "label": "Propiedad", "field": "prop", "align": "left"},
+                             {"name": "valor", "label": "Valor", "field": "valor", "align": "left"}],
+                    rows=view["props"], row_key="prop",
+                ).classes("w-full").props("dense flat bordered hide-header")
+
+            # escalado detallado
+            self._scaling_block(view["scaling"])
+
+            # campos (si es compuesto)
+            if view["fields"]:
+                ui.label("Campos").classes("text-bold q-mt-sm")
+                ui.table(columns=views.MESSAGE_COLUMNS, rows=view["fields"], row_key="name") \
+                    .classes("w-full").props("dense flat bordered wrap-cells")
+
+    def _scaling_block(self, scaling: dict) -> None:
+        kind = scaling.get("kind")
+        if kind is None:
+            return
+        with ui.column().classes("w-full q-mt-sm gap-1"):
+            if kind == "linear":
+                ui.label("Escalado lineal").classes("text-bold")
+                ui.markdown(f"`{scaling['formula']}`")
+            elif kind == "enum":
+                ui.label("Estados (Enum)").classes("text-bold")
+                ui.table(
+                    columns=[{"name": "valor", "label": "Valor", "field": "valor", "align": "right"},
+                             {"name": "estado", "label": "Estado", "field": "estado", "align": "left"}],
+                    rows=scaling["labels"], row_key="valor",
+                ).classes("w-full").props("dense flat bordered")
+            elif kind == "lut":
+                ui.label(f"Tabla de tramos (LUT){' · ' + scaling['units'] if scaling.get('units') else ''}") \
+                    .classes("text-bold")
+                ui.table(
+                    columns=[{"name": c, "label": c.capitalize(), "field": c, "align": "right"}
+                             for c in ("desde", "hasta", "lsb", "offset")],
+                    rows=scaling["ranges"], row_key="desde",
+                ).classes("w-full").props("dense flat bordered")
+            elif kind == "raw" and scaling.get("units"):
+                ui.label(f"Sin escalado · unidades: {scaling['units']}").classes("text-grey")
 
     def _attr_input(self, entity: Entity, f: dataclasses.Field) -> None:
         value = getattr(entity, f.name)
