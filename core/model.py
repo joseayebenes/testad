@@ -1,13 +1,14 @@
 """Modelo de dominio para describir cualquier mensaje de comunicación.
 
-Diseñado desde cero como un sistema de tipos, sin relación con la estructura
-del XML de origen. El parser (core/parser.py) es solo un traductor XML→modelo.
+Diseñado desde cero, sin relación con la estructura del XML de origen: el
+parser (core/parser.py) traduce los XMI de Eclipse EMF a este modelo en un
+solo sentido (los XML no se reescriben; la persistencia futura será JSON).
 
 Sistema de tipos (qué se transmite)
 -----------------------------------
     TypeDef                     definición de tipo reutilizable
     ├── ScalarType              entero/real codificado (longitud en bits,
-    │                           codificación, unidades, escalado físico)
+    │                           codificación, escalado físico)
     ├── TextType                cadenas de longitud fija o variable
     └── CompositeType           tipos con campos
         ├── RecordType          registro: secuencia de campos posicionados
@@ -35,11 +36,6 @@ Organización
     Module                      unidad bajo control de configuración
     Folder                      agrupación recursiva
     Reference                   enlace a otra entidad (local o entre archivos)
-
-Fidelidad con el XML original (necesaria para guardar cambios): los atributos
-que el modelo no mapea quedan en ``extra``; ``source_type``/``source_tag``
-guardan el xsi:type/tag originales; ``Module.nsmap`` los namespaces. Son
-metadatos internos del writer: la UI y el generador de código no los tocan.
 """
 
 from __future__ import annotations
@@ -58,7 +54,6 @@ class Reference:
     target_id: str = ""
     file: str = ""                  # vacío = mismo archivo
     role: str = "with"              # origen del enlace (with, explicitNational_EC...)
-    hint_type: str = ""             # xsi:type declarado junto al href, si lo había
     owner: Optional["Entity"] = field(default=None, repr=False, compare=False)
     target: Optional["Entity"] = field(default=None, repr=False, compare=False)
 
@@ -91,7 +86,6 @@ class Scaling:
     """Base de las reglas de interpretación física del valor crudo."""
 
     units: str = ""
-    extra: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -133,11 +127,6 @@ class Entity:
     name: str = ""
     security: str = ""
     remarks: str = ""
-    # Atributos XML no mapeados por el modelo (fidelidad para el writer).
-    extra: Dict[str, str] = field(default_factory=dict)
-    # Metadatos del writer: xsi:type y tag originales.
-    source_type: str = ""
-    source_tag: str = ""
     parent: Optional["Entity"] = field(default=None, repr=False, compare=False)
 
     @property
@@ -200,8 +189,8 @@ class Entity:
 # ---------------------------------------------------------------------- #
 @dataclass
 class TypeDef(Entity):
-    """Definición de tipo reutilizable. Base concreta: los tipos aún no
-    modelados se instancian como TypeDef y conservan todo en ``extra``."""
+    """Definición de tipo reutilizable. Base concreta: los tipos del XML aún
+    no modelados se instancian como TypeDef plano."""
 
 
 @dataclass
@@ -372,6 +361,7 @@ class Bus(Entity):
 @dataclass
 class Network(Entity):
     protocol: str = ""                      # "UDP" | "TCP"
+    alias: str = ""
     ports: List[Port] = field(default_factory=list)
     buses: List[Bus] = field(default_factory=list)
 
@@ -403,9 +393,9 @@ class Module(Folder):
     us_export_control: str = ""
     explicit_national_ec: Optional[Reference] = None
     explicit_us_ec: Optional[Reference] = None
-    # Metadatos del archivo origen (para el writer).
+    # Archivo del que se parseó: necesario para resolver referencias
+    # entre archivos ('Base.xmi#_id') cuando hay varios módulos cargados.
     source_file: str = ""
-    nsmap: Dict[str, str] = field(default_factory=dict)
 
     @property
     def children(self) -> List[Entity]:

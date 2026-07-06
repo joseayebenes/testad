@@ -38,10 +38,8 @@ def test_module_root():
     assert main.id == "_mod_fcs"
     assert main.national_export_control == "ES:DUAL"
     assert main.us_export_control == "NONE:null"
-    # metadatos para el writer
+    # el archivo de origen se conserva para resolver referencias entre módulos
     assert main.source_file == "FCS_ICD.xmi"
-    assert main.nsmap["Data"] == "http://www.ads.org/icdms/Data"
-    assert main.nsmap["IP"] == "http://www.ads.org/icdms/IP"
 
 
 def test_folder_hierarchy():
@@ -146,7 +144,7 @@ def test_network_ports_bus_slots():
     net = main.networks[0]
     assert isinstance(net, Network)
     assert net.protocol == "UDP"
-    assert net.extra.get("alias") == "LAN-A"
+    assert net.alias == "LAN-A"
 
     port = net.ports[0]
     assert isinstance(port, Port)
@@ -197,7 +195,6 @@ def test_resolve_cross_file_reference():
     assert ref.is_resolved
     assert ref.target.name == "Altitude"
     assert ref.target is base.find_one(name="Altitude")
-    assert ref.hint_type == "Data:Signal"
 
 
 def test_unresolved_reported():
@@ -213,15 +210,16 @@ def test_unresolved_reported():
 
 
 # ---------------------------------------------------------------------- #
-# Fidelidad y edición
+# Robustez y edición
 # ---------------------------------------------------------------------- #
-def test_unmapped_attributes_preserved():
-    """Los atributos que el modelo no mapea no se pierden (requisito writer)."""
+def test_unknown_attributes_ignored():
+    """Los atributos sin significado de ingeniería (UniqueID...) se ignoran
+    sin romper el parseo; el modelo queda limpio, sin restos del XML."""
     _, main, _, _ = load_all()
     speed = main.find_one(ScalarType, "AirSpeed")
-    assert speed.extra == {"UniqueID": "FCS-001"}
-    assert speed.source_type == "Data:Signal"
-    assert speed.source_tag == "data"
+    assert speed.bit_length == 16
+    assert not hasattr(speed, "extra")
+    assert not hasattr(speed, "source_type")
 
 
 def test_edit_in_memory():

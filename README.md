@@ -12,6 +12,10 @@ campos condicionales, escalados físicos... — sin relación con la estructura
 del XML de origen. El parser (`core/parser.py`) es solo un traductor
 XML → modelo, y es la única pieza del sistema que conoce el formato EMF.
 
+El flujo es de **un solo sentido**: los XML solo se leen. La persistencia
+de la herramienta será en JSON, por lo que el modelo no arrastra ningún
+metadato del XML (namespaces, atributos crudos, xsi:types...).
+
 ```
 core/
   model.py     Modelo de dominio (sistema de tipos + transmisión + organización)
@@ -45,17 +49,6 @@ tests/
 `Message` (payload + periodo/rate), `Network`/`Port`/`Bus`/`MessageSlot`
 (arquitectura de comunicaciones), `Module`/`Folder` (organización y control
 de configuración, con control de exportación militar).
-
-### Fidelidad round-trip
-
-Para poder guardar los cambios de vuelta al XML sin pérdida:
-
-* Los atributos XML que el modelo no mapea quedan en `entity.extra`.
-* `source_type` / `source_tag` conservan el `xsi:type` y tag originales.
-* `Module.nsmap` conserva los namespaces declarados en el archivo.
-
-Son metadatos internos del futuro `ICDWriter`: la UI y el generador de
-código no los tocan.
 
 ## Uso
 
@@ -91,5 +84,5 @@ python3 tests/test_parser.py      # o: python -m pytest tests/
 ## Hoja de ruta
 
 - [x] Fase 1-2: modelo de dominio + parser + registro
-- [ ] Fase 3: `ICDWriter` — guardar los cambios de vuelta al XML
+- [ ] Fase 3: persistencia en JSON (guardar/cargar el modelo)
 - [ ] Fase 4: interfaz web (Streamlit) y generación de código
