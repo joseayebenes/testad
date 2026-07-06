@@ -18,6 +18,9 @@ metadato del XML (namespaces, atributos crudos, xsi:types...).
 
 ```
 main.py          CLI: carga todos los ICD de una carpeta y muestra resultados
+web/
+  session.py     Estado de una sesión de trabajo (envuelve core/, sin UI)
+  app.py         Interfaz web NiceGUI: árbol, editor, validación
 core/
   model.py       Modelo de dominio (sistema de tipos + transmisión + organización)
   parser.py      Traductor XMI -> modelo (stdlib xml.etree, sin dependencias)
@@ -70,6 +73,24 @@ python3 main.py <carpeta> --quiet          # sin logs de progreso del parser
 Importante: para que las referencias `href` cruzadas se resuelvan, todos los
 ficheros referenciados deben estar en la carpeta (p. ej. cargar `JREAP_IM`
 **y** `JREAP_Signals.module` juntos).
+
+## Interfaz web
+
+Interfaz NiceGUI (Python puro) para navegar y editar el modelo:
+
+```bash
+pip install -r requirements.txt
+python3 -m web.app --folder tests/data     # http://localhost:8080
+```
+
+Pantalla: barra superior (cargar carpeta · guardar JSON · estado con
+errores/avisos) · árbol de módulos con expansión perezosa y búsqueda ·
+ficha de la entidad seleccionada con atributos editables, referencias
+(navegables), layout (`describe()`) e incidencias de validación. Cada
+edición revalida el modelo al instante y actualiza los contadores.
+
+La lógica vive en `web/session.py` (`WorkSession`), que envuelve `core/`
+sin depender de NiceGUI, así que es testeable sin navegador.
 
 ## Uso programático
 
@@ -145,4 +166,5 @@ Flujo típico: cargar XML → editar en memoria → `save_module` (JSON) →
 
 - [x] Fase 1-2: modelo de dominio + parser + registro
 - [x] Fase 3: persistencia en JSON (guardar/cargar el modelo)
-- [ ] Fase 4: interfaz web (Streamlit) y generación de código
+- [x] Fase 4a: interfaz web (NiceGUI) — navegar y editar
+- [ ] Fase 4b: generación de código desde el modelo

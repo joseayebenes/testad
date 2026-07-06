@@ -1,0 +1,6 @@
+# Núcleo (parser/modelo/registro/validación/persistencia): solo stdlib.
+# La interfaz web necesita:
+nicegui>=3.0
+
+# Para las pruebas end-to-end de la web (opcional, solo desarrollo):
+#   pip install playwright && playwright install chromium
