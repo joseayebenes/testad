@@ -11,7 +11,8 @@
 
   <folder id="_f_signals" name="Signals" security="UNCLAS">
     <data xsi:type="Data:Signal" id="_sig_speed" name="AirSpeed"
-          length="16" coding="twoComplement" security="UNCLAS" UniqueID="FCS-001">
+          length="16" coding="twoComplement" security="UNCLAS" UniqueID="FCS-001"
+          description="Velocidad aerodinámica calibrada">
       <scal id="_sc_speed" security="UNCLAS">
         <owns xsi:type="Scal:Lineal" id="_ln_speed" lsb="0.0625" offset="0" units="kt"/>
       </scal>

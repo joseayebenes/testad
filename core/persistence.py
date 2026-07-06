@@ -59,6 +59,7 @@ def _common(e: Entity) -> Dict[str, Any]:
     _put(d, "name", e.name)
     _put(d, "security", e.security)
     _put(d, "remarks", e.remarks)
+    _put(d, "description", e.description)
     return d
 
 
@@ -67,6 +68,7 @@ def _load_common(e: Entity, d: Dict[str, Any], parent: Optional[Entity]) -> None
     e.name = d.get("name", "")
     e.security = d.get("security", "")
     e.remarks = d.get("remarks", "")
+    e.description = d.get("description", "")
     e.parent = parent
 
 

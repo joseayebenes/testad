@@ -127,6 +127,7 @@ class Entity:
     name: str = ""
     security: str = ""
     remarks: str = ""
+    description: str = ""
     parent: Optional["Entity"] = field(default=None, repr=False, compare=False)
 
     @property

@@ -154,6 +154,7 @@ class ICDParser:
         e.name = attrs.get("name", "")
         e.security = attrs.get("security", "")
         e.remarks = attrs.get("remarks", "")
+        e.description = attrs.get("description", "")
         return e
 
     @staticmethod

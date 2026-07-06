@@ -38,6 +38,7 @@ class Row:
     parent_key: str = ""     # fila padre (estructura que la contiene)
     has_children: bool = False
     ref_id: str = ""         # id de la entidad referenciada (para el enlace)
+    description: str = ""     # descripción del campo (o de su tipo)
 
     def as_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -125,6 +126,8 @@ def _note(f: Field) -> str:
 def _field_row(f: Field, level: int, key: str, parent_key: str, has_children: bool) -> Row:
     dt = f.datatype
     ref_id = f.ref.target.id if (f.ref is not None and f.ref.is_resolved and f.ref.target) else ""
+    # descripción del campo o, si no tiene, la de su tipo
+    description = f.description or (dt.description if dt is not None else "")
     return Row(
         level=level,
         name=f.name,
@@ -139,6 +142,7 @@ def _field_row(f: Field, level: int, key: str, parent_key: str, has_children: bo
         parent_key=parent_key,
         has_children=has_children,
         ref_id=ref_id,
+        description=description,
     )
 
 

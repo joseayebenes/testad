@@ -307,7 +307,10 @@ class ICDApp:
                     .props("flat dense round size=sm")
             else:
                 ui.element("div").style("width:24px;")
-            ui.label(r.name or "—").classes("text-xs")
+            name_label = ui.label(r.name or "—").classes("text-xs")
+            if r.description:
+                name_label.tooltip(r.description)
+                ui.icon("info", size="14px").classes("text-grey-5").tooltip(r.description)
         self._cell(r.length, right=True)
         self._cell(r.position, right=True)
         self._cell(r.type_name)

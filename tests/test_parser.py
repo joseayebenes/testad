@@ -64,6 +64,7 @@ def test_scalar_with_linear_scaling():
     assert isinstance(speed.scaling, LinearScaling)
     assert speed.scaling.lsb == 0.0625
     assert speed.units == "kt"
+    assert speed.description == "Velocidad aerodinámica calibrada"
 
 
 def test_scalar_with_enum_scaling():
