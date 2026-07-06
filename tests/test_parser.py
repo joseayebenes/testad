@@ -231,6 +231,17 @@ def test_edit_in_memory():
     assert main.find_one(ScalarType, "AirSpeedCAS").bit_length == 32
 
 
+def test_message_describe():
+    """describe() muestra el layout completo siguiendo referencias resueltas."""
+    _, main, _, _ = load_all()
+    out = main.find_one(Message, "NavMsg").describe()
+    assert "Message 'NavMsg' — periodo=40, periodic" in out
+    assert "RecordType 'NavBlock' — 3 campos, 48 bits" in out
+    assert "[w16 0:0] speedField: AirSpeed — 16 bits, twoComplement, v=raw×0.0625 kt" in out
+    assert "[w16 1:0] altField: Altitude — 24 bits" in out          # resuelta entre archivos
+    assert "counterField (inline): frameCounter — 8 bits" in out    # tipo definido in situ
+
+
 def test_paths_and_find():
     _, main, _, _ = load_all()
     navblock = main.find_one(RecordType, "NavBlock")

@@ -187,10 +187,50 @@ class Entity:
 # ---------------------------------------------------------------------- #
 # Sistema de tipos
 # ---------------------------------------------------------------------- #
+def _scaling_summary(s: Optional[Scaling]) -> str:
+    if isinstance(s, LinearScaling):
+        out = f"v=raw×{s.lsb:g}"
+        if s.offset:
+            out += f"{s.offset:+g}"
+        return out + (f" {s.units}" if s.units else "")
+    if isinstance(s, EnumScaling):
+        items = " | ".join(f"{v}={t}" for v, t in list(s.labels.items())[:4])
+        if len(s.labels) > 4:
+            items += " | ..."
+        return f"estados: {items}"
+    if isinstance(s, LUTScaling):
+        return f"LUT de {len(s.ranges)} tramos" + (f" {s.units}" if s.units else "")
+    if s is not None and s.units:
+        return s.units
+    return ""
+
+
 @dataclass
 class TypeDef(Entity):
     """Definición de tipo reutilizable. Base concreta: los tipos del XML aún
     no modelados se instancian como TypeDef plano."""
+
+    def summary(self) -> str:
+        """Resumen de una línea de la definición ('16 bits, twoComplement...')."""
+        return ""
+
+    def describe(self, indent: int = 0, _seen: Optional[set] = None) -> str:
+        """Descripción completa del tipo, siguiendo referencias resueltas."""
+        _seen = _seen if _seen is not None else set()
+        pad = "  " * indent
+        head = f"{pad}{type(self).__name__} '{self.name}'"
+        s = self.summary()
+        if s:
+            head += f" — {s}"
+        lines = [head]
+        if isinstance(self, CompositeType):
+            if id(self) in _seen:
+                lines.append(f"{pad}  ... (recursivo)")
+            else:
+                _seen.add(id(self))
+                for f in self.fields:
+                    lines.append(f.describe(indent + 1, _seen))
+        return "\n".join(lines)
 
 
 @dataclass
@@ -206,6 +246,15 @@ class ScalarType(TypeDef):
     def units(self) -> str:
         return self.scaling.units if self.scaling else ""
 
+    def summary(self) -> str:
+        parts = [f"{self.bit_length} bits"]
+        if self.encoding:
+            parts.append(self.encoding)
+        s = _scaling_summary(self.scaling)
+        if s:
+            parts.append(s)
+        return ", ".join(parts)
+
 
 @dataclass
 class TextType(TypeDef):
@@ -215,6 +264,12 @@ class TextType(TypeDef):
     length_mode: str = ""           # 'fixed' | 'variable'
     encoding: str = ""              # ASCII, UTF8...
     bit_endianness: str = ""
+
+    def summary(self) -> str:
+        parts = [f"texto {self.length_mode or '?'}", f"{self.max_chars} chars"]
+        if self.encoding:
+            parts.append(self.encoding)
+        return ", ".join(parts)
 
 
 @dataclass
@@ -252,6 +307,27 @@ class Field(Entity):
     def references(self) -> List[Reference]:
         return [self.ref] if self.ref is not None else []
 
+    def describe(self, indent: int = 0, _seen: Optional[set] = None) -> str:
+        """Línea del campo: posición física + tipo, descendiendo si es compuesto."""
+        _seen = _seen if _seen is not None else set()
+        pad = "  " * indent
+        pos = f"[w16 {self.position.word16}:{self.position.bit16}]"
+        cond = f" (si ={self.condition})" if self.is_conditional else ""
+        origin = " (inline)" if self.inline is not None else ""
+
+        dt = self.datatype
+        if dt is None:
+            target = self.ref.href if self.ref else "?"
+            return f"{pad}{pos} {self.name or '<campo>'}{cond}: SIN RESOLVER -> {target}"
+
+        if isinstance(dt, CompositeType):
+            head = f"{pad}{pos} {self.name or '<campo>'}{cond}{origin}:"
+            return head + "\n" + dt.describe(indent + 1, _seen)
+
+        summary = dt.summary()
+        label = f"{dt.name}" + (f" — {summary}" if summary else "")
+        return f"{pad}{pos} {self.name or '<campo>'}{cond}{origin}: {label}"
+
 
 @dataclass
 class CompositeType(TypeDef):
@@ -270,6 +346,12 @@ class RecordType(CompositeType):
 
     bit_length: int = 0
 
+    def summary(self) -> str:
+        out = f"{len(self.fields)} campos"
+        if self.bit_length:
+            out += f", {self.bit_length} bits"
+        return out
+
 
 @dataclass
 class ArrayType(CompositeType):
@@ -279,6 +361,10 @@ class ArrayType(CompositeType):
     counter_type: str = ""
     counter_bits: int = 0
     max_count: int = 0
+
+    def summary(self) -> str:
+        counter = self.counter_type or (f"{self.counter_bits} bits" if self.counter_bits else "?")
+        return f"array variable, contador {counter}, máx {self.max_count}"
 
 
 @dataclass
@@ -294,6 +380,9 @@ class VariantType(CompositeType):
     @property
     def cases(self) -> List[Field]:
         return [f for f in self.fields if f.is_conditional]
+
+    def summary(self) -> str:
+        return f"variante por '{self.discriminator}', {len(self.cases)} casos"
 
 
 # ---------------------------------------------------------------------- #
@@ -322,6 +411,22 @@ class Message(Entity):
 
     def references(self) -> List[Reference]:
         return [self.payload] if self.payload is not None else []
+
+    def describe(self) -> str:
+        """Ficha completa del mensaje con su layout, para inspección rápida."""
+        props = []
+        if self.period:
+            props.append(f"periodo={self.period}")
+        if self.rate_mode:
+            props.append(self.rate_mode)
+        head = f"Message '{self.name}'" + (f" — {', '.join(props)}" if props else "")
+
+        st = self.structure
+        if st is not None:
+            return head + "\n" + st.describe(indent=1)
+        if self.payload is not None:
+            return head + f"\n  payload SIN RESOLVER -> {self.payload.href}"
+        return head + "\n  (sin payload)"
 
 
 @dataclass
