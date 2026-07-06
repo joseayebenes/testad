@@ -22,10 +22,12 @@ core/
   parser.py      Traductor XMI -> modelo (stdlib xml.etree, sin dependencias)
   registry.py    Índice global por id + resolución de referencias entre archivos
   validation.py  Validador: campos obligatorios, solapamientos, refs rotas...
+  persistence.py Guardar/cargar el modelo en JSON (formato propio)
 tests/
   data/          XMIs de ejemplo fieles al formato de producción
   test_parser.py
   test_validation.py
+  test_persistence.py
 ```
 
 ## El modelo
@@ -102,8 +104,28 @@ print(summarize(issues))
 python3 tests/test_parser.py      # o: python -m pytest tests/
 ```
 
+### Persistencia JSON
+
+La herramienta guarda y carga el modelo en su propio formato JSON (un módulo
+por archivo, limpio: solo valores con contenido). Las referencias se guardan
+por id y se re-enlazan tras cargar, igual que al parsear XML.
+
+```python
+from core.persistence import save_module, load_module
+
+save_module(module, "FCS_ICD.json")           # modelo -> JSON
+
+registry = ICDRegistry()
+module = load_module("FCS_ICD.json", registry) # JSON -> modelo
+load_module("BaseSignals.json", registry)
+registry.resolve_references()                  # re-enlaza las referencias
+```
+
+Flujo típico: cargar XML → editar en memoria → `save_module` (JSON) →
+`load_module` para recuperar el trabajo sin volver a tocar el XML.
+
 ## Hoja de ruta
 
 - [x] Fase 1-2: modelo de dominio + parser + registro
-- [ ] Fase 3: persistencia en JSON (guardar/cargar el modelo)
+- [x] Fase 3: persistencia en JSON (guardar/cargar el modelo)
 - [ ] Fase 4: interfaz web (Streamlit) y generación de código
