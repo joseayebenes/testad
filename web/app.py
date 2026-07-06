@@ -208,6 +208,9 @@ class ICDApp:
 
     def _add_child(self, parent: Entity, cls: type, menu) -> None:
         menu.close()
+        self._create_child(parent, cls)
+
+    def _create_child(self, parent: Entity, cls: type) -> None:
         try:
             new = self.session.add_child(parent, cls)
         except ValueError as exc:
@@ -264,6 +267,10 @@ class ICDApp:
                 st = message.structure
                 ui.label(f"{len(rows)} campos · payload: {st.name if st else '(sin resolver)'}") \
                     .classes("text-sm text-grey")
+                if isinstance(st, CompositeType):
+                    ui.button("Editar campos", icon="edit",
+                              on_click=lambda s=st: self._goto(s)).props("flat dense") \
+                        .tooltip("ir a la estructura del payload para añadir/borrar campos")
             if not rows:
                 ui.label("El mensaje no tiene payload resuelto.").classes("text-negative")
                 return
@@ -357,12 +364,10 @@ class ICDApp:
             ui.notify("La referencia no está cargada", type="warning")
 
     def _type_viewer(self, typedef: TypeDef) -> None:
-        """Visor de tipo: cómo se decodifica (propiedades + escalado + campos)."""
+        """Visor de tipo: propiedades + escalado editable + campos editables."""
         view = views.type_view(typedef)
         with ui.card().classes("w-full"):
             ui.label(f"Visor de tipo · {view['kind']}").classes("text-bold")
-
-            # propiedades de decodificación
             if view["props"]:
                 ui.table(
                     columns=[{"name": "prop", "label": "Propiedad", "field": "prop", "align": "left"},
@@ -370,40 +375,137 @@ class ICDApp:
                     rows=view["props"], row_key="prop",
                 ).classes("w-full").props("dense flat bordered hide-header")
 
-            # escalado detallado
-            self._scaling_block(view["scaling"])
+        if isinstance(typedef, ScalarType):
+            self._scaling_editor(typedef)
+        if isinstance(typedef, CompositeType):
+            self._fields_editor(typedef)
 
-            # campos (si es compuesto)
-            if view["fields"]:
-                ui.label("Campos").classes("text-bold q-mt-sm")
-                ui.table(columns=views.MESSAGE_COLUMNS, rows=view["fields"], row_key="name") \
-                    .classes("w-full").props("dense flat bordered wrap-cells")
+    # ---- editor de escalado -------------------------------------------- #
+    _SCALING_KINDS = {"none": "Sin escalado", "linear": "Lineal", "enum": "Enum", "lut": "LUT"}
 
-    def _scaling_block(self, scaling: dict) -> None:
-        kind = scaling.get("kind")
-        if kind is None:
-            return
-        with ui.column().classes("w-full q-mt-sm gap-1"):
-            if kind == "linear":
-                ui.label("Escalado lineal").classes("text-bold")
-                ui.markdown(f"`{scaling['formula']}`")
-            elif kind == "enum":
-                ui.label("Estados (Enum)").classes("text-bold")
-                ui.table(
-                    columns=[{"name": "valor", "label": "Valor", "field": "valor", "align": "right"},
-                             {"name": "estado", "label": "Estado", "field": "estado", "align": "left"}],
-                    rows=scaling["labels"], row_key="valor",
-                ).classes("w-full").props("dense flat bordered")
-            elif kind == "lut":
-                ui.label(f"Tabla de tramos (LUT){' · ' + scaling['units'] if scaling.get('units') else ''}") \
-                    .classes("text-bold")
-                ui.table(
-                    columns=[{"name": c, "label": c.capitalize(), "field": c, "align": "right"}
-                             for c in ("desde", "hasta", "lsb", "offset")],
-                    rows=scaling["ranges"], row_key="desde",
-                ).classes("w-full").props("dense flat bordered")
-            elif kind == "raw" and scaling.get("units"):
-                ui.label(f"Sin escalado · unidades: {scaling['units']}").classes("text-grey")
+    @staticmethod
+    def _scaling_kind(scalar: ScalarType) -> str:
+        from core.model import EnumScaling, LinearScaling, LUTScaling
+        s = scalar.scaling
+        if isinstance(s, LinearScaling):
+            return "linear"
+        if isinstance(s, EnumScaling):
+            return "enum"
+        if isinstance(s, LUTScaling):
+            return "lut"
+        return "none"
+
+    def _scaling_editor(self, scalar: ScalarType) -> None:
+        from core.model import EnumScaling, LinearScaling, LUTScaling
+        kind = self._scaling_kind(scalar)
+        with ui.card().classes("w-full"):
+            with ui.row().classes("items-center w-full"):
+                ui.label("Escalado").classes("text-bold")
+                ui.space()
+                sel = ui.select(self._SCALING_KINDS, value=kind).props("dense outlined").classes("w-40")
+                sel.on_value_change(lambda e: self._change_scaling_kind(scalar, e.value))
+
+            s = scalar.scaling
+            if isinstance(s, LinearScaling):
+                with ui.row().classes("items-center gap-3"):
+                    self._scaling_num(scalar, "lsb", s.lsb, "lsb")
+                    self._scaling_num(scalar, "offset", s.offset, "offset")
+                    self._scaling_txt(scalar, "units", s.units, "unidades")
+                ui.markdown(f"`valor = crudo × {s.lsb:g}"
+                            + (f" + {s.offset:g}" if s.offset else "") + "`").classes("text-grey")
+            elif isinstance(s, EnumScaling):
+                self._scaling_txt(scalar, "units", s.units, "unidades")
+                for i, (val, lab) in enumerate(list(s.labels.items())):
+                    self._enum_row(scalar, i, val, lab)
+                ui.button("Añadir estado", icon="add",
+                          on_click=lambda: self._add_enum(scalar)).props("flat dense")
+            elif isinstance(s, LUTScaling):
+                self._scaling_txt(scalar, "units", s.units, "unidades")
+                with ui.row().classes("items-center gap-2 text-xs text-grey"):
+                    for h in ("desde", "hasta", "lsb", "offset", ""):
+                        ui.label(h).style("width:88px;")
+                for i, r in enumerate(s.ranges):
+                    self._lut_row(scalar, i, r)
+                ui.button("Añadir tramo", icon="add",
+                          on_click=lambda: self._add_lut(scalar)).props("flat dense")
+
+    def _scaling_num(self, scalar, attr, value, label):
+        inp = ui.number(label, value=value, format="%g").props("dense outlined").classes("w-28")
+        inp.on("blur", lambda _=None, c=inp: self._commit_scaling(scalar, attr, c.value))
+
+    def _scaling_txt(self, scalar, attr, value, label):
+        inp = ui.input(label, value=value).props("dense outlined").classes("w-28")
+        inp.on("blur", lambda _=None, c=inp: self._commit_scaling(scalar, attr, c.value))
+
+    def _enum_row(self, scalar, index, value, label):
+        with ui.row().classes("items-center gap-2"):
+            vi = ui.input("valor", value=value).props("dense outlined").classes("w-24")
+            li = ui.input("estado", value=label).props("dense outlined").classes("w-48")
+            commit = lambda _=None, v=vi, l=li: self._commit_enum(scalar, index, v.value, l.value)
+            vi.on("blur", commit)
+            li.on("blur", commit)
+            ui.button(icon="delete", color="negative",
+                      on_click=lambda: self._remove_enum(scalar, index)).props("flat dense round")
+
+    def _lut_row(self, scalar, index, r):
+        with ui.row().classes("items-center gap-2"):
+            for attr, val in (("begin", r.begin), ("end", r.end), ("lsb", r.lsb), ("offset", r.offset)):
+                inp = ui.number(value=val, format="%g").props("dense outlined").style("width:88px;")
+                inp.on("blur", lambda _=None, a=attr, c=inp: self._commit_lut(scalar, index, a, c.value))
+            ui.button(icon="delete", color="negative",
+                      on_click=lambda: self._remove_lut(scalar, index)).props("flat dense round")
+
+    # commits: inline (sin reconstruir, para no perder el foco) vs estructurales
+    def _commit_scaling(self, scalar, attr, value):
+        self.session.edit_scaling_attr(scalar, attr, str(value))
+        self._refresh_status()
+
+    def _commit_enum(self, scalar, index, value, label):
+        self.session.set_enum_row(scalar, index, str(value), str(label))
+        self._refresh_status()
+
+    def _commit_lut(self, scalar, index, attr, value):
+        self.session.set_lut_cell(scalar, index, attr, str(value))
+        self._refresh_status()
+
+    def _change_scaling_kind(self, scalar, kind):
+        self.session.set_scaling_kind(scalar, kind)
+        self._refresh_status(); self._render_detail()
+
+    def _add_enum(self, scalar):
+        self.session.add_enum_label(scalar); self._refresh_status(); self._render_detail()
+
+    def _remove_enum(self, scalar, index):
+        self.session.remove_enum_row(scalar, index); self._refresh_status(); self._render_detail()
+
+    def _add_lut(self, scalar):
+        self.session.add_lut_range(scalar); self._refresh_status(); self._render_detail()
+
+    def _remove_lut(self, scalar, index):
+        self.session.remove_lut_range(scalar, index); self._refresh_status(); self._render_detail()
+
+    # ---- editor de campos de un compuesto ------------------------------ #
+    def _fields_editor(self, comp: CompositeType) -> None:
+        with ui.card().classes("w-full"):
+            with ui.row().classes("items-center w-full"):
+                ui.label(f"Campos ({len(comp.fields)})").classes("text-bold")
+                ui.space()
+                ui.button("Añadir campo", icon="add",
+                          on_click=lambda: self._create_child(comp, Field)).props("flat dense")
+            if not comp.fields:
+                ui.label("Sin campos.").classes("text-grey")
+            for f in comp.fields:
+                with ui.row().classes("items-center w-full gap-2"):
+                    dt = f.datatype
+                    label = f.name or "(campo)"
+                    detail = f" · {type(dt).__name__} {dt.name}" if dt else ""
+                    ui.icon("square", size="14px").classes("text-grey-5")
+                    ui.button(f"{label}{detail}", on_click=lambda e=f: self._goto(e)) \
+                        .props("flat dense align-left").classes("normal-case")
+                    ui.space()
+                    ui.button(icon="delete", color="negative",
+                              on_click=lambda e=f: self._delete(e)).props("flat dense round") \
+                        .tooltip("borrar campo")
 
     def _attr_input(self, entity: Entity, f: dataclasses.Field) -> None:
         value = getattr(entity, f.name)

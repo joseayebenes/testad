@@ -14,9 +14,10 @@ import os
 from typing import Dict, List, Optional
 
 from core.model import (
-    ArrayType, Bus, CompositeType, Entity, Field, Folder, Message,
-    MessageSlot, Module, Network, Port, RecordType, Reference, ScalarType,
-    TextType, TypeDef, VariantType,
+    ArrayType, Bus, CompositeType, Entity, EnumScaling, Field, Folder,
+    LinearScaling, LUTRange, LUTScaling, Message, MessageSlot, Module,
+    Network, Port, RecordType, Reference, ScalarType, Scaling, TextType,
+    TypeDef, VariantType,
 )
 from core.parser import ICDParser
 from core.persistence import load_module, save_module
@@ -325,6 +326,86 @@ class WorkSession:
                     if ref.target is entity or (ref.target_id and ref.target_id == entity.id):
                         out.append(ref)
         return out
+
+    # ------------------------------------------------------------------ #
+    # Escalado de señales (Scalar): tipo, y campos de enum / LUT
+    # ------------------------------------------------------------------ #
+    def set_scaling_kind(self, scalar: ScalarType, kind: str) -> None:
+        """Cambia el tipo de escalado: 'none' | 'linear' | 'enum' | 'lut'."""
+        units = scalar.scaling.units if scalar.scaling else ""
+        factory = {
+            "none": lambda: None,
+            "linear": lambda: LinearScaling(units=units),
+            "enum": lambda: EnumScaling(units=units),
+            "lut": lambda: LUTScaling(units=units),
+        }
+        if kind not in factory:
+            raise ValueError(f"tipo de escalado desconocido: {kind}")
+        scalar.scaling = factory[kind]()
+        self.dirty = True
+        self.revalidate()
+
+    def edit_scaling_attr(self, scalar: ScalarType, attr: str, raw: str) -> None:
+        """Edita un atributo del escalado (units, o lsb/offset numéricos)."""
+        s = scalar.scaling
+        if s is None:
+            return
+        if attr == "units":
+            s.units = raw
+        else:
+            setattr(s, attr, float(raw) if str(raw).strip() else 0.0)
+        self.dirty = True
+
+    def _ensure_scaling(self, scalar: ScalarType, cls) -> None:
+        if not isinstance(scalar.scaling, cls):
+            units = scalar.scaling.units if scalar.scaling else ""
+            scalar.scaling = cls(units=units)
+
+    # -- Enum: pares valor -> estado --------------------------------- #
+    def add_enum_label(self, scalar: ScalarType) -> None:
+        self._ensure_scaling(scalar, EnumScaling)
+        labels = scalar.scaling.labels
+        i = 0
+        while str(i) in labels:
+            i += 1
+        labels[str(i)] = "NUEVO"
+        self.dirty = True
+        self.revalidate()
+
+    def set_enum_row(self, scalar: ScalarType, index: int, value: str, label: str) -> None:
+        items = list(scalar.scaling.labels.items())
+        if 0 <= index < len(items):
+            items[index] = (value, label)
+            scalar.scaling.labels = dict(items)   # preserva el orden
+            self.dirty = True
+
+    def remove_enum_row(self, scalar: ScalarType, index: int) -> None:
+        items = list(scalar.scaling.labels.items())
+        if 0 <= index < len(items):
+            del items[index]
+            scalar.scaling.labels = dict(items)
+            self.dirty = True
+            self.revalidate()
+
+    # -- LUT: tramos begin/end/lsb/offset ---------------------------- #
+    def add_lut_range(self, scalar: ScalarType) -> None:
+        self._ensure_scaling(scalar, LUTScaling)
+        scalar.scaling.ranges.append(LUTRange())
+        self.dirty = True
+        self.revalidate()
+
+    def set_lut_cell(self, scalar: ScalarType, index: int, attr: str, raw: str) -> None:
+        ranges = scalar.scaling.ranges
+        if 0 <= index < len(ranges):
+            setattr(ranges[index], attr, float(raw) if str(raw).strip() else 0.0)
+            self.dirty = True
+
+    def remove_lut_range(self, scalar: ScalarType, index: int) -> None:
+        ranges = scalar.scaling.ranges
+        if 0 <= index < len(ranges):
+            del ranges[index]
+            self.dirty = True
+            self.revalidate()
 
     def issues_for(self, entity: Entity) -> List[Issue]:
         prefix = entity.path

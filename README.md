@@ -104,14 +104,20 @@ ficha de la entidad seleccionada con atributos editables, referencias
 (navegables), layout (`describe()`) e incidencias de validación. Cada
 edición revalida el modelo al instante y actualiza los contadores.
 
-Edición estructural:
+Edición:
 
-* **Crear** entidades con el botón *Añadir* (los tipos válidos dependen del
-  contenedor: señales/registros/mensajes en una carpeta, campos en un
-  registro, puertos/buses en una red...).
-* **Borrar** entidades; se avisa de las referencias que quedan colgando.
-* **Editar referencias** (`with`, payload...) con un selector de búsqueda
-  que enlaza incluso entre módulos distintos.
+* **Atributos** — cualquier atributo escalar (nombre, longitud, codificación,
+  descripción, condición...) se edita en la ficha.
+* **Crear/borrar entidades** con *Añadir*/*Borrar* (los tipos válidos
+  dependen del contenedor: señales/registros/mensajes en una carpeta, campos
+  en un registro, puertos/buses en una red...). Al borrar se avisa de las
+  referencias que quedan colgando.
+* **Referencias** (`with`, payload...) con un selector de búsqueda que enlaza
+  incluso entre módulos distintos.
+* **Escalado de señales** — cambiar el tipo (ninguno/lineal/enum/LUT), editar
+  lsb/offset/unidades, y **añadir/borrar** estados de enum y tramos de LUT.
+* **Campos de estructuras** — añadir/borrar campos de registros, arrays y
+  variantes desde el visor de tipo.
 
 Visores (`web/views.py`):
 

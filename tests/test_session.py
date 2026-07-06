@@ -149,6 +149,54 @@ def test_cross_module_reference_sets_file():
     assert field.ref.file == "BaseSignals.xmi"        # referencia entre archivos
 
 
+def test_scaling_edit_enum():
+    from core.model import EnumScaling
+    s = _session()
+    gear = s.registry.get_module("FCS_ICD").find_one(ScalarType, "GearStatus")
+    assert isinstance(gear.scaling, EnumScaling)
+    n = len(gear.scaling.labels)
+    s.add_enum_label(gear)
+    assert len(gear.scaling.labels) == n + 1
+    # editar el estado recién creado (último)
+    s.set_enum_row(gear, n, "9", "EMERGENCY")
+    assert gear.scaling.labels["9"] == "EMERGENCY"
+    s.remove_enum_row(gear, 0)                      # borra UP (value 0)
+    assert "0" not in gear.scaling.labels
+    assert s.dirty
+
+
+def test_scaling_change_kind_and_lut():
+    from core.model import LUTScaling, LinearScaling
+    s = _session()
+    speed = s.registry.get_module("FCS_ICD").find_one(ScalarType, "AirSpeed")
+    assert isinstance(speed.scaling, LinearScaling)
+    # cambiar a LUT y añadir tramos
+    s.set_scaling_kind(speed, "lut")
+    assert isinstance(speed.scaling, LUTScaling)
+    s.add_lut_range(speed)
+    s.add_lut_range(speed)
+    assert len(speed.scaling.ranges) == 2
+    s.set_lut_cell(speed, 0, "begin", "0")
+    s.set_lut_cell(speed, 0, "end", "100")
+    s.set_lut_cell(speed, 0, "lsb", "0.5")
+    assert speed.scaling.ranges[0].end == 100.0 and speed.scaling.ranges[0].lsb == 0.5
+    s.remove_lut_range(speed, 1)
+    assert len(speed.scaling.ranges) == 1
+    # quitar el escalado del todo
+    s.set_scaling_kind(speed, "none")
+    assert speed.scaling is None
+
+
+def test_add_delete_field_to_structure():
+    s = _session()
+    nb = s.registry.get_module("FCS_ICD").find_one(RecordType, "NavBlock")
+    n = len(nb.fields)
+    fld = s.add_child(nb, Field)
+    assert len(nb.fields) == n + 1 and fld in nb.fields
+    s.delete(fld)
+    assert len(nb.fields) == n
+
+
 def test_import_xml_then_work_from_json():
     """Flujo: importar XML una vez -> JSON -> editar -> guardar -> reabrir."""
     import tempfile
