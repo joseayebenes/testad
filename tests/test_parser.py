@@ -1,6 +1,6 @@
-"""Tests del parser, el modelo genérico y el registro.
+"""Tests del modelo de dominio, el parser y el registro.
 
-Ejecutar con:  python -m pytest tests/  (o  python tests/test_parser.py)
+Ejecutar con:  python3 tests/test_parser.py   (o python -m pytest tests/)
 """
 
 import os
@@ -8,7 +8,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.model import ICDNode
+from core.model import (
+    ArrayType, Bus, EnumScaling, Field, Folder, LinearScaling, Message,
+    MessageSlot, Module, Network, Port, RecordType, ScalarType, TextType,
+    VariantType,
+)
 from core.parser import ICDParser
 from core.registry import ICDRegistry
 
@@ -25,15 +29,17 @@ def load_all():
 
 
 # ---------------------------------------------------------------------- #
-# Estructura del árbol
+# Módulo y organización
 # ---------------------------------------------------------------------- #
 def test_module_root():
     _, main, _, _ = load_all()
-    assert main.kind == "Module"
+    assert isinstance(main, Module)
     assert main.name == "FCS_ICD"
     assert main.id == "_mod_fcs"
     assert main.national_export_control == "ES:DUAL"
-    # El namespace original queda disponible para el writer
+    assert main.us_export_control == "NONE:null"
+    # metadatos para el writer
+    assert main.source_file == "FCS_ICD.xmi"
     assert main.nsmap["Data"] == "http://www.ads.org/icdms/Data"
     assert main.nsmap["IP"] == "http://www.ads.org/icdms/IP"
 
@@ -41,101 +47,129 @@ def test_module_root():
 def test_folder_hierarchy():
     _, main, _, _ = load_all()
     assert [f.name for f in main.folders] == ["Signals", "Messages"]
-    messages = main.folders[1]
-    nav = messages.folders[0]
-    assert nav.name == "Navigation"
-    # Los data quedan DENTRO de su carpeta, no colgando de la raíz
-    assert main.data_elements == []
-    assert {d.name for d in nav.data_elements} == {"NavBlock", "NavHeader", "NavMsg"}
-
-
-def test_kinds_from_xsi_type():
-    _, main, _, _ = load_all()
-    signals = main.folders[0]
-    kinds = {d.name: d.kind for d in signals.data_elements}
-    assert kinds == {
-        "AirSpeed": "Signal",
-        "CallSign": "TextSignal",
-        "Waypoints": "VariableArray",
-    }
     nav = main.folders[1].folders[0]
-    assert nav.find_one(name="NavBlock").kind == "Structure"
-    assert nav.find_one(name="NavHeader").kind == "Header"
-    assert nav.find_one(name="NavMsg").kind == "Message"
-
-
-def test_all_attributes_preserved():
-    """Ningún atributo del XML original puede perderse (requisito del writer)."""
-    _, main, _, _ = load_all()
-    speed = main.find_one(name="AirSpeed")
-    assert speed.attrs == {
-        "xsi:type": "Data:Signal",
-        "id": "_sig_speed",
-        "name": "AirSpeed",
-        "length": "16",
-        "coding": "twoComplement",
-        "units": "kt",
-        "security": "UNCLAS",
-    }
-    # Y las propiedades tipadas leen de ahí
-    assert speed.length == 16
-    assert speed.units == "kt"
-    assert speed.coding == "twoComplement"
-
-
-def test_layout_positions():
-    _, main, _, _ = load_all()
-    navblock = main.find_one(name="NavBlock")
-    assert [f.name for f in navblock.fields] == ["speedField", "altField", "counterField"]
-    alt_field = navblock.fields[1]
-    assert alt_field.layout["w16"] == 1
-    assert alt_field.layout["w16_b"] == 0
-
-
-def test_owns_inline_containment():
-    _, main, _, _ = load_all()
-    counter_field = main.find_one(name="counterField")
-    owned = counter_field.owns
-    assert owned is not None
-    assert owned.name == "frameCounter"
-    assert owned.kind == "Signal"
-    assert owned.length == 8
-    # el owns cuelga del dataField en el árbol (parent correcto)
-    assert owned.parent is counter_field
-
-
-def test_header_members():
-    _, main, _, _ = load_all()
-    header = main.find_one(name="NavHeader")
-    assert header.get("key") == "opcode"
-    members = [f for f in header.fields if f.kind == "IsMember"]
-    assert len(members) == 1
-    assert members[0].key_selector == "1"
-
-
-def test_network_and_ports():
-    _, main, _, _ = load_all()
-    assert len(main.networks) == 1
-    net = main.networks[0]
-    assert net.kind == "UDPNetwork"
-    assert net.get("alias") == "LAN-A"
-    port = net.find_one(kind="Port")
-    assert port.get("ipAddress") == "10.0.0.1"
-    assert port.get_int("port") == 5001
-    bus = net.find_one(kind="Bus")
-    assert bus.coding == "ETH"
-    slot = bus.find_one(kind="MessageSlot")
-    assert slot.period == 40
-    assert slot.get("multicastIP") == "224.0.0.5"
-
-
-def test_text_props():
-    _, main, _, _ = load_all()
-    assert main.text_props.get("NationalExportControl") == "ES:DUAL"
+    assert nav.name == "Navigation"
+    # Los tipos y mensajes viven DENTRO de su carpeta
+    assert main.types == [] and main.messages == []
+    assert {t.name for t in nav.types} == {"NavBlock", "NavHeader"}
+    assert [m.name for m in nav.messages] == ["NavMsg"]
 
 
 # ---------------------------------------------------------------------- #
-# Registro y resolución de referencias
+# Sistema de tipos
+# ---------------------------------------------------------------------- #
+def test_scalar_with_linear_scaling():
+    _, main, _, _ = load_all()
+    speed = main.find_one(ScalarType, "AirSpeed")
+    assert speed.bit_length == 16
+    assert speed.encoding == "twoComplement"
+    assert isinstance(speed.scaling, LinearScaling)
+    assert speed.scaling.lsb == 0.0625
+    assert speed.units == "kt"
+
+
+def test_scalar_with_enum_scaling():
+    _, main, _, _ = load_all()
+    gear = main.find_one(ScalarType, "GearStatus")
+    assert isinstance(gear.scaling, EnumScaling)
+    assert gear.scaling.labels == {"0": "UP", "1": "DOWN", "2": "TRANSIT"}
+
+
+def test_text_type():
+    _, main, _, _ = load_all()
+    callsign = main.find_one(TextType, "CallSign")
+    assert callsign.max_chars == 8
+    assert callsign.length_mode == "fixed"
+    assert callsign.encoding == "ASCII"
+
+
+def test_variable_array():
+    """Campos variables: array regido por contador transmitido."""
+    _, main, _, _ = load_all()
+    waypoints = main.find_one(ArrayType, "Waypoints")
+    assert waypoints.counter_type == "uint8"
+    assert waypoints.counter_bits == 8
+    assert waypoints.max_count == 32
+    # el elemento del array se describe con sus fields
+    assert len(waypoints.fields) == 1
+    assert waypoints.fields[0].datatype.name == "AirSpeed"
+
+
+def test_record_fields_and_positions():
+    _, main, _, _ = load_all()
+    navblock = main.find_one(RecordType, "NavBlock")
+    assert navblock.bit_length == 48
+    assert [f.name for f in navblock.fields] == ["speedField", "altField", "counterField"]
+    alt = navblock.fields[1]
+    assert alt.position.word16 == 1
+    assert alt.position.bit16 == 0
+
+
+def test_inline_type_definition():
+    """<owns> = tipo definido in situ dentro del campo."""
+    _, main, _, _ = load_all()
+    counter_field = main.find_one(Field, "counterField")
+    inline = counter_field.inline
+    assert isinstance(inline, ScalarType)
+    assert inline.name == "frameCounter"
+    assert inline.bit_length == 8
+    assert counter_field.datatype is inline
+    assert inline.parent is counter_field
+
+
+def test_variant_conditional_fields():
+    """Campos condicionales: VariantType multiplexa por discriminador."""
+    _, main, _, _ = load_all()
+    header = main.find_one(VariantType, "NavHeader")
+    assert header.discriminator == "opcode"
+    assert len(header.cases) == 1
+    case = header.cases[0]
+    assert case.condition == "1"
+    assert case.is_conditional
+    assert case.datatype.name == "NavBlock"
+
+
+def test_message_payload():
+    _, main, _, _ = load_all()
+    msg = main.find_one(Message, "NavMsg")
+    assert msg.period == 40
+    assert msg.rate_mode == "periodic"
+    assert msg.structure.name == "NavBlock"
+
+
+# ---------------------------------------------------------------------- #
+# Arquitectura de comunicaciones
+# ---------------------------------------------------------------------- #
+def test_network_ports_bus_slots():
+    _, main, _, _ = load_all()
+    assert len(main.networks) == 1
+    net = main.networks[0]
+    assert isinstance(net, Network)
+    assert net.protocol == "UDP"
+    assert net.extra.get("alias") == "LAN-A"
+
+    port = net.ports[0]
+    assert isinstance(port, Port)
+    assert port.number == 5001
+    assert port.ip_address == "10.0.0.1"
+    assert port.role == "server"
+
+    bus = net.buses[0]
+    assert isinstance(bus, Bus)
+    assert bus.coding == "ETH"
+    assert bus.speed == "100"          # viene del <owns> interno
+    assert bus.name == "mainBus"
+
+    slot = bus.slots[0]
+    assert isinstance(slot, MessageSlot)
+    assert slot.period == 40
+    assert slot.multicast_ip == "224.0.0.5"
+    assert slot.max_peak_rate == 25
+    assert slot.message.target.name == "NavMsg"
+
+
+# ---------------------------------------------------------------------- #
+# Registro y referencias
 # ---------------------------------------------------------------------- #
 def test_registry_indexing():
     registry, main, base, _ = load_all()
@@ -146,66 +180,66 @@ def test_registry_indexing():
     assert not registry.duplicate_ids
 
 
-def test_resolve_local_attribute_ref():
-    """with="_sig_speed" como atributo se resuelve dentro del mismo archivo."""
+def test_resolve_local_reference():
+    """with="_sig_speed" (atributo) se resuelve en el mismo archivo."""
     _, main, _, _ = load_all()
-    speed_field = main.find_one(name="speedField")
-    ref = speed_field.with_ref
-    assert ref is not None and ref.is_resolved
-    assert ref.target.name == "AirSpeed"
+    speed_field = main.find_one(Field, "speedField")
+    assert speed_field.ref.is_resolved
+    assert speed_field.datatype.name == "AirSpeed"
 
 
-def test_resolve_cross_file_href():
+def test_resolve_cross_file_reference():
     """<with href="BaseSignals.xmi#_sig_alt"/> cruza archivos."""
-    _, main, _, _ = load_all()
-    alt_field = main.find_one(name="altField")
-    ref = alt_field.with_ref
-    assert ref is not None and ref.is_resolved
+    _, main, base, _ = load_all()
+    alt_field = main.find_one(Field, "altField")
+    ref = alt_field.ref
+    assert ref.file == "BaseSignals.xmi"
+    assert ref.is_resolved
     assert ref.target.name == "Altitude"
-    assert ref.target.source_file == "BaseSignals.xmi"
-    assert ref.xsi_type == "Data:Signal"
+    assert ref.target is base.find_one(name="Altitude")
+    assert ref.hint_type == "Data:Signal"
 
 
-def test_resolve_chain_message_to_struct():
-    """NavMsg -> NavBlock y la ranura del bus -> NavMsg."""
-    _, main, _, _ = load_all()
-    msg = main.find_one(name="NavMsg")
-    assert msg.with_ref.target.name == "NavBlock"
-    slot = main.find_one(kind="MessageSlot")
-    assert slot.with_ref.target is msg
-
-
-def test_unresolved_reported_not_silent():
-    """El href a ExportRules.xmi (no cargado) debe aparecer en el informe."""
-    _, _, _, report = load_all()
+def test_unresolved_reported():
+    """El href a ExportRules.xmi (no cargado) aparece en el informe."""
+    _, main, _, report = load_all()
     assert len(report.unresolved) == 1
     ref, reason = report.unresolved[0]
-    assert ref.tag == "explicitNational_EC"
+    assert ref.role == "explicitNational_EC"
+    assert ref is main.explicit_national_ec
     assert "ExportRules.xmi" in reason
-    # speedField, altField, isMember, NavMsg y la ranura del bus
-    assert report.resolved == 5
+    # waypoint, speedField, altField, isMember, NavMsg y ranura del bus
+    assert report.resolved == 6
 
 
 # ---------------------------------------------------------------------- #
-# Utilidades del modelo
+# Fidelidad y edición
 # ---------------------------------------------------------------------- #
-def test_find_and_path():
+def test_unmapped_attributes_preserved():
+    """Los atributos que el modelo no mapea no se pierden (requisito writer)."""
     _, main, _, _ = load_all()
-    all_signals = main.find(kind="Signal")  # AirSpeed + frameCounter (inline)
-    assert {s.name for s in all_signals} == {"AirSpeed", "frameCounter"}
-    navblock = main.find_one(name="NavBlock")
-    assert navblock.path == "FCS_ICD/Messages/Navigation/NavBlock"
+    speed = main.find_one(ScalarType, "AirSpeed")
+    assert speed.extra == {"UniqueID": "FCS-001"}
+    assert speed.source_type == "Data:Signal"
+    assert speed.source_tag == "data"
 
 
 def test_edit_in_memory():
-    """El modelo es editable: cambiar un atributo se refleja en attrs (writer-ready)."""
+    """El modelo es pythónico: se edita con atributos normales."""
     _, main, _, _ = load_all()
-    speed = main.find_one(name="AirSpeed")
-    speed.set("length", 32)
-    assert speed.length == 32
-    assert speed.attrs["length"] == "32"
+    speed = main.find_one(ScalarType, "AirSpeed")
+    speed.bit_length = 32
     speed.name = "AirSpeedCAS"
-    assert speed.attrs["name"] == "AirSpeedCAS"
+    assert main.find_one(ScalarType, "AirSpeedCAS").bit_length == 32
+
+
+def test_paths_and_find():
+    _, main, _, _ = load_all()
+    navblock = main.find_one(RecordType, "NavBlock")
+    assert navblock.path == "FCS_ICD/Messages/Navigation/NavBlock"
+    # find por clase en todo el módulo: los 3 escalares del folder + inline
+    scalars = main.find(ScalarType)
+    assert {s.name for s in scalars} == {"AirSpeed", "GearStatus", "frameCounter"}
 
 
 def _run_all():

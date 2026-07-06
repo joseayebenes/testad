@@ -4,62 +4,65 @@ Backend en Python puro para parsear, modelar, editar y (futuramente) generar
 código a partir de ICDs (Interface Control Documents) exportados en XML/XMI
 desde herramientas basadas en Eclipse EMF.
 
-## Arquitectura
+## Filosofía
+
+El modelo de dominio (`core/model.py`) está diseñado desde cero para
+describir **cualquier mensaje de comunicación** — con campos variables,
+campos condicionales, escalados físicos... — sin relación con la estructura
+del XML de origen. El parser (`core/parser.py`) es solo un traductor
+XML → modelo, y es la única pieza del sistema que conoce el formato EMF.
 
 ```
 core/
-  model.py     Modelo de datos genérico (ICDNode + Ref)
-  parser.py    Parser XMI (stdlib xml.etree, sin dependencias externas)
-  registry.py  Índice global por xmi:id + resolución de referencias
+  model.py     Modelo de dominio (sistema de tipos + transmisión + organización)
+  parser.py    Traductor XMI -> modelo (stdlib xml.etree, sin dependencias)
+  registry.py  Índice global por id + resolución de referencias entre archivos
 tests/
   data/        XMIs de ejemplo fieles al formato de producción
   test_parser.py
 ```
 
-### Modelo genérico (`core/model.py`)
+## El modelo
 
-En lugar de una dataclass por `xsi:type` (el enfoque anterior, difícil de
-mantener con decenas de tipos y campos), el modelo usa **un único nodo
-genérico**:
+### Sistema de tipos (qué se transmite)
 
-- **`ICDNode`** — árbol Composite. `kind` da la semántica (`Signal`,
-  `Message`, `Folder`, `UDPNetwork`...), derivada de `xsi:type` o del tag.
-- **`attrs`** conserva *todos* los atributos XML originales, por lo que el
-  árbol puede reserializarse sin pérdida (requisito del futuro `ICDWriter`).
-- **`Ref`** — cualquier referencia, tanto `<with href="Otro.xmi#_id"/>`
-  (entre archivos) como `with="_id"` (atributo local, estilo EMF).
-- Propiedades tipadas de conveniencia: `length`, `coding`, `layout` (w16/w12),
-  `national_export_control`, `fields`, `owns`, `with_ref`...
-- Utilidades: `walk()`, `find(kind=..., name=...)`, `path`, `pretty()`.
+| Clase          | Concepto                                                        |
+|----------------|-----------------------------------------------------------------|
+| `ScalarType`   | valor numérico: longitud en bits, codificación, escalado físico |
+| `TextType`     | cadena de longitud fija o variable                              |
+| `RecordType`   | registro: secuencia de `Field` posicionados                     |
+| `ArrayType`    | **campos variables**: lista regida por un contador transmitido  |
+| `VariantType`  | **campos condicionales**: payloads alternativos multiplexados por un discriminador |
+| `Field`        | hueco en un composite: posición física (`BitPosition`, palabras 16/12 bits) + tipo (por `Reference` o definido inline) + `condition` |
 
-Un tag o atributo nuevo en producción **no requiere tocar el parser ni el
-modelo**: se conserva automáticamente.
+### Escalado físico (cómo se interpreta el valor crudo)
 
-### Parser (`core/parser.py`)
+`LinearScaling` (v = raw·lsb + offset), `EnumScaling` (valor → etiqueta),
+`LUTScaling` (calibración por tramos).
 
-Tres únicas reglas de interpretación del formato EMF:
+### Transmisión y organización
 
-1. Hijo con `href` y sin hijos → referencia (`Ref`).
-2. Atributo `with="_id"` → referencia local.
-3. Hijo sin atributos con solo texto → propiedad textual
-   (`<NationalExportControl>...`).
+`Message` (payload + periodo/rate), `Network`/`Port`/`Bus`/`MessageSlot`
+(arquitectura de comunicaciones), `Module`/`Folder` (organización y control
+de configuración, con control de exportación militar).
 
-Todo lo demás se convierte en nodos del árbol tal cual. Los namespaces del
-archivo se guardan en `root.nsmap` para que el writer reserialice con los
-prefijos originales.
+### Fidelidad round-trip
 
-### Registro (`core/registry.py`)
+Para poder guardar los cambios de vuelta al XML sin pérdida:
 
-Indexa todos los nodos por `xmi:id` (global y por archivo).
-`resolve_references()` enlaza las referencias cruzadas y devuelve un
-`ResolutionReport` con las resueltas y las pendientes (p. ej. archivos aún no
-cargados), pensado para mostrarse en la futura UI.
+* Los atributos XML que el modelo no mapea quedan en `entity.extra`.
+* `source_type` / `source_tag` conservan el `xsi:type` y tag originales.
+* `Module.nsmap` conserva los namespaces declarados en el archivo.
+
+Son metadatos internos del futuro `ICDWriter`: la UI y el generador de
+código no los tocan.
 
 ## Uso
 
 ```python
 from core.parser import ICDParser
 from core.registry import ICDRegistry
+from core.model import ScalarType, Message
 
 registry = ICDRegistry()
 parser = ICDParser(registry)
@@ -67,12 +70,16 @@ parser = ICDParser(registry)
 module = parser.parse_file("FCS_ICD.xmi")
 parser.parse_file("BaseSignals.xmi")
 
-report = registry.resolve_references()
-print(module.pretty())      # árbol legible
-print(report.summary())     # estado de las referencias
+report = registry.resolve_references()   # enlaza with/href entre archivos
+print(module.pretty())                   # árbol legible
+print(report.summary())                  # referencias resueltas/pendientes
 
-signal = module.find_one(name="AirSpeed")
-signal.set("length", 32)    # edición en memoria, lista para el writer
+speed = module.find_one(ScalarType, "AirSpeed")
+print(speed.bit_length, speed.units)     # 16 kt
+speed.bit_length = 32                    # edición pythónica en memoria
+
+for msg in module.find(Message):
+    print(msg.name, msg.period, msg.structure.name)
 ```
 
 ## Tests
@@ -83,6 +90,6 @@ python3 tests/test_parser.py      # o: python -m pytest tests/
 
 ## Hoja de ruta
 
-- [x] Fase 1-2: modelo + parser + registro (reescritos, versión genérica)
-- [ ] Fase 3: `ICDWriter` — reserialización XML sin pérdida
+- [x] Fase 1-2: modelo de dominio + parser + registro
+- [ ] Fase 3: `ICDWriter` — guardar los cambios de vuelta al XML
 - [ ] Fase 4: interfaz web (Streamlit) y generación de código

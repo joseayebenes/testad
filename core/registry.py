@@ -1,13 +1,12 @@
 """Registro global de entidades ICD.
 
-Indexa todos los nodos por xmi:id (globalmente y por archivo) y resuelve las
-referencias débiles del modelo:
+Indexa todas las entidades por id (globalmente y por archivo de origen) y
+resuelve los ``Reference`` del modelo: enlaces locales (``with="_id"``) y
+entre archivos (``href="BaseSignals.xmi#_sig_alt"``).
 
-* ``<with href="BaseSignals.xmi#_sig_alt"/>``  — referencia entre archivos.
-* ``with="_sig_speed"``                        — referencia local por atributo.
-
-``resolve_references()`` devuelve un informe con lo resuelto y lo pendiente,
-en lugar de solo loguear errores, para que la futura UI pueda mostrarlo.
+``resolve_references()`` devuelve un ``ResolutionReport`` con lo resuelto y
+lo pendiente (p. ej. archivos aún no cargados), pensado para mostrarse en la
+futura UI, no solo para el log.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from core.model import ICDNode, Ref
+from core.model import Entity, Module, Reference
 
 logger = logging.getLogger("ICDRegistry")
 
@@ -24,7 +23,7 @@ logger = logging.getLogger("ICDRegistry")
 @dataclass
 class ResolutionReport:
     resolved: int = 0
-    unresolved: List[Tuple[Ref, str]] = field(default_factory=list)
+    unresolved: List[Tuple[Reference, str]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -33,58 +32,53 @@ class ResolutionReport:
     def summary(self) -> str:
         lines = [f"Referencias resueltas: {self.resolved}"]
         for ref, reason in self.unresolved:
-            owner = ref.source.path if ref.source else "?"
-            lines.append(f"  SIN RESOLVER [{owner}] {ref.tag} -> {ref.href or ref.ref_id}: {reason}")
+            owner = ref.owner.path if ref.owner else "?"
+            lines.append(f"  SIN RESOLVER [{owner}] {ref.role} -> {ref.href}: {reason}")
         return "\n".join(lines)
 
 
 class ICDRegistry:
     def __init__(self) -> None:
-        # id -> nodo, índice global (primer registro gana; los duplicados se anotan)
-        self._by_id: Dict[str, ICDNode] = {}
-        # archivo -> (id -> nodo), para resolver hrefs con nombre de archivo
-        self._by_file: Dict[str, Dict[str, ICDNode]] = {}
-        # nombre de módulo -> nodo raíz
-        self._modules: Dict[str, ICDNode] = {}
+        # Índice global id -> entidad (el primero gana; duplicados anotados).
+        self._by_id: Dict[str, Entity] = {}
+        # Índice por archivo, para hrefs cualificados con nombre de archivo.
+        self._by_file: Dict[str, Dict[str, Entity]] = {}
+        self._modules: Dict[str, Module] = {}
         self.duplicate_ids: List[str] = []
 
     # ------------------------------------------------------------------ #
     # Registro
     # ------------------------------------------------------------------ #
-    def register_tree(self, root: ICDNode, source_file: str = "") -> None:
-        """Registra un módulo completo (raíz + todos sus descendientes)."""
-        fname = source_file or root.source_file
-        if root.kind == "Module":
-            self._modules[root.name] = root
-
-        file_index = self._by_file.setdefault(fname, {})
-        for node in root.walk():
-            node_id = node.id
-            if not node_id:
+    def register_module(self, module: Module) -> None:
+        """Registra un módulo completo (raíz y todos sus descendientes)."""
+        self._modules[module.name] = module
+        file_index = self._by_file.setdefault(module.source_file, {})
+        for entity in module.walk():
+            if not entity.id:
                 continue
-            if node_id in self._by_id and self._by_id[node_id] is not node:
-                self.duplicate_ids.append(node_id)
-                logger.warning("xmi:id duplicado entre archivos: %s", node_id)
+            if entity.id in self._by_id and self._by_id[entity.id] is not entity:
+                self.duplicate_ids.append(entity.id)
+                logger.warning("id duplicado entre archivos: %s", entity.id)
             else:
-                self._by_id[node_id] = node
-            file_index[node_id] = node
+                self._by_id[entity.id] = entity
+            file_index[entity.id] = entity
 
     # ------------------------------------------------------------------ #
     # Consulta
     # ------------------------------------------------------------------ #
-    def get(self, xmi_id: str, source_file: str = "") -> Optional[ICDNode]:
+    def get(self, entity_id: str, source_file: str = "") -> Optional[Entity]:
         """Busca por id; si se indica archivo, ese índice tiene prioridad."""
         if source_file and source_file in self._by_file:
-            node = self._by_file[source_file].get(xmi_id)
-            if node is not None:
-                return node
-        return self._by_id.get(xmi_id)
+            entity = self._by_file[source_file].get(entity_id)
+            if entity is not None:
+                return entity
+        return self._by_id.get(entity_id)
 
-    def get_module(self, name: str) -> Optional[ICDNode]:
+    def get_module(self, name: str) -> Optional[Module]:
         return self._modules.get(name)
 
     @property
-    def modules(self) -> List[ICDNode]:
+    def modules(self) -> List[Module]:
         return list(self._modules.values())
 
     @property
@@ -100,29 +94,25 @@ class ICDRegistry:
     def resolve_references(self) -> ResolutionReport:
         report = ResolutionReport()
         for module in self._modules.values():
-            for node in module.walk():
-                for ref in node.refs:
+            for entity in module.walk():
+                for ref in entity.references():
                     if ref.is_resolved:
                         report.resolved += 1
                         continue
-                    target_id = ref.target_id
-                    if not target_id:
+                    if not ref.target_id:
                         report.unresolved.append((ref, "referencia vacía"))
                         continue
-                    target = self.get(target_id, source_file=ref.target_file)
+                    target = self.get(ref.target_id, source_file=ref.file)
                     if target is not None:
                         ref.target = target
                         report.resolved += 1
                     else:
-                        reason = (
-                            f"id '{target_id}' no encontrado"
-                            + (f" (archivo '{ref.target_file}' no cargado)"
-                               if ref.target_file and ref.target_file not in self._by_file
-                               else "")
-                        )
+                        reason = f"id '{ref.target_id}' no encontrado"
+                        if ref.file and ref.file not in self._by_file:
+                            reason += f" (archivo '{ref.file}' no cargado)"
                         report.unresolved.append((ref, reason))
                         logger.error(
                             "Fallo al enlazar %s '%s' en '%s': %s",
-                            ref.tag, ref.href or ref.ref_id, node.path, reason,
+                            ref.role, ref.href, entity.path, reason,
                         )
         return report

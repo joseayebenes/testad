@@ -1,331 +1,415 @@
-"""Modelo de datos simplificado para ICDs (Interface Control Documents).
+"""Modelo de dominio para describir cualquier mensaje de comunicación.
 
-Filosofía de diseño
--------------------
-Los XML de producción tienen decenas de tipos y atributos, lo que hacía el
-metamodelo anterior (una dataclass por xsi:type) difícil de entender y de
-mantener. Este modelo lo sustituye por UN único tipo de nodo genérico:
+Diseñado desde cero como un sistema de tipos, sin relación con la estructura
+del XML de origen. El parser (core/parser.py) es solo un traductor XML→modelo.
 
-* ``ICDNode``  — cualquier elemento del XML (Module, folder, data, dataField,
-  owns, port, ...). Forma un árbol (patrón Composite).
-* ``Ref``      — cualquier referencia a otra entidad, ya venga como elemento
-  hijo ``<with href="..."/>`` o como atributo ``with="_id"``.
+Sistema de tipos (qué se transmite)
+-----------------------------------
+    TypeDef                     definición de tipo reutilizable
+    ├── ScalarType              entero/real codificado (longitud en bits,
+    │                           codificación, unidades, escalado físico)
+    ├── TextType                cadenas de longitud fija o variable
+    └── CompositeType           tipos con campos
+        ├── RecordType          registro: secuencia de campos posicionados
+        ├── ArrayType           lista de longitud variable regida por contador
+        └── VariantType         campos condicionales: payloads alternativos
+                                seleccionados por un discriminador
 
-Toda la información original se conserva:
+    Field                       hueco dentro de un composite: posición física
+                                + tipo (referencia o inline) + condición
 
-* ``attrs``       — TODOS los atributos XML tal cual (claves con su prefijo
-  normalizado: ``xsi:type``, ``xmi:id``, ``name``...). Esto garantiza que el
-  writer podrá reserializar sin pérdida.
-* ``text_props``  — elementos hijo que solo llevan texto
-  (``<NationalExportControl>ES:DUAL</NationalExportControl>``).
-* ``nsmap``       — en el nodo raíz, los namespaces declarados en el archivo.
+Escalado físico (cómo se interpreta el valor crudo)
+---------------------------------------------------
+    LinearScaling               v = raw * lsb + offset
+    EnumScaling                 valor -> etiqueta de estado
+    LUTScaling                  calibración por tramos
 
-La semántica se expone mediante ``kind`` (derivado de ``xsi:type`` o del tag)
-y propiedades de conveniencia (``name``, ``length``, ``layout``...), de modo
-que el resto del código nunca necesita conocer los detalles crudos del XML.
+Transmisión (cuándo/dónde se transmite)
+---------------------------------------
+    Message                     payload + características temporales
+    Network / Port / Bus /      arquitectura de comunicaciones
+    MessageSlot                 ranura de un mensaje en un bus
+
+Organización
+------------
+    Module                      unidad bajo control de configuración
+    Folder                      agrupación recursiva
+    Reference                   enlace a otra entidad (local o entre archivos)
+
+Fidelidad con el XML original (necesaria para guardar cambios): los atributos
+que el modelo no mapea quedan en ``extra``; ``source_type``/``source_tag``
+guardan el xsi:type/tag originales; ``Module.nsmap`` los namespaces. Son
+metadatos internos del writer: la UI y el generador de código no los tocan.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional
-
-# Tags de elementos hijo que son referencias puras (llevan href y nada más).
-REFERENCE_TAGS = {"with", "explicitNational_EC", "explicitUS_EC"}
-
-# Atributos que contienen referencias por id dentro del mismo archivo
-# (estilo EMF: las referencias locales van como atributo, las externas como
-# elemento hijo con href).
-REFERENCE_ATTRS = {"with"}
-
-# kind por defecto cuando el elemento no lleva xsi:type.
-DEFAULT_KINDS = {
-    "Module": "Module",
-    "folder": "Folder",
-    "data": "Data",
-    "dataField": "DataField",
-    "array": "Array",
-    "isMember": "IsMember",
-    "owns": "Owns",
-    "port": "Port",
-    "bus": "Bus",
-    "message": "MessageSlot",  # <message> dentro de un bus: ranura de transmisión
-}
-
-# kinds que actúan como contenedores de la jerarquía lógica.
-CONTAINER_KINDS = {"Module", "Folder"}
+from typing import Dict, Iterator, List, Optional, Type
 
 
+# ---------------------------------------------------------------------- #
+# Referencias y posición física
+# ---------------------------------------------------------------------- #
 @dataclass
-class Ref:
-    """Referencia hacia otra entidad del modelo (local o entre archivos).
+class Reference:
+    """Enlace hacia otra entidad, local ('_id') o externa ('Base.xmi#_id')."""
 
-    ``tag``   — de dónde salió: 'with', 'explicitNational_EC', ...
-    ``href``  — forma 'Archivo.xmi#_id' (referencia externa) o vacío.
-    ``ref_id``— id directo cuando la referencia venía como atributo local.
-    ``target``— nodo real, rellenado por ICDRegistry.resolve_references().
-    """
-
-    tag: str = "with"
-    href: str = ""
-    ref_id: str = ""
-    xsi_type: str = ""
-    source: Optional["ICDNode"] = field(default=None, repr=False)
-    target: Optional["ICDNode"] = field(default=None, repr=False)
-
-    @property
-    def target_id(self) -> str:
-        """Fragmento id al que apunta, venga de href o de atributo."""
-        if self.ref_id:
-            return self.ref_id
-        return self.href.split("#")[-1] if self.href else ""
-
-    @property
-    def target_file(self) -> str:
-        """Nombre de archivo del href ('' si es referencia local)."""
-        if "#" in self.href:
-            fname = self.href.split("#", 1)[0]
-            return fname
-        return ""
+    target_id: str = ""
+    file: str = ""                  # vacío = mismo archivo
+    role: str = "with"              # origen del enlace (with, explicitNational_EC...)
+    hint_type: str = ""             # xsi:type declarado junto al href, si lo había
+    owner: Optional["Entity"] = field(default=None, repr=False, compare=False)
+    target: Optional["Entity"] = field(default=None, repr=False, compare=False)
 
     @property
     def is_resolved(self) -> bool:
         return self.target is not None
 
+    @property
+    def href(self) -> str:
+        return f"{self.file}#{self.target_id}" if self.file else self.target_id
+
 
 @dataclass
-class ICDNode:
-    """Nodo genérico del árbol ICD. Representa cualquier elemento XML."""
+class BitPosition:
+    """Posición física de un campo (palabras de 16/12 bits + offset de bit)."""
 
-    tag: str = ""
-    attrs: Dict[str, str] = field(default_factory=dict)
-    children: List["ICDNode"] = field(default_factory=list)
-    refs: List[Ref] = field(default_factory=list)
-    text_props: Dict[str, str] = field(default_factory=dict)
-    parent: Optional["ICDNode"] = field(default=None, repr=False, compare=False)
-    source_file: str = ""
-    # Solo el nodo raíz (Module) lo rellena: prefijo -> URI.
-    nsmap: Dict[str, str] = field(default_factory=dict)
+    word16: int = 0
+    bit16: int = 0
+    word12: int = 0
+    bit12: int = 0
+    max_position: int = 0
+    pre_padding: int = 0
 
-    # ------------------------------------------------------------------ #
-    # Identidad y semántica
-    # ------------------------------------------------------------------ #
-    @property
-    def id(self) -> str:
-        return self.attrs.get("id", self.attrs.get("xmi:id", ""))
 
-    @property
-    def name(self) -> str:
-        return self.attrs.get("name", "")
+# ---------------------------------------------------------------------- #
+# Escalado físico
+# ---------------------------------------------------------------------- #
+@dataclass
+class Scaling:
+    """Base de las reglas de interpretación física del valor crudo."""
 
-    @name.setter
-    def name(self, value: str) -> None:
-        self.attrs["name"] = value
+    units: str = ""
+    extra: Dict[str, str] = field(default_factory=dict)
 
-    @property
-    def xsi_type(self) -> str:
-        return self.attrs.get("xsi:type", "")
 
-    @property
-    def kind(self) -> str:
-        """Tipo semántico: 'Signal', 'Message', 'Folder'...
+@dataclass
+class LinearScaling(Scaling):
+    """v_fisico = raw * lsb + offset."""
 
-        Prioridad: xsi:type ('Data:VariableArray' -> 'VariableArray'),
-        después el tag con su alias por defecto.
-        """
-        if self.xsi_type:
-            return self.xsi_type.split(":")[-1]
-        if self.tag in DEFAULT_KINDS:
-            return DEFAULT_KINDS[self.tag]
-        # Solo mayúscula inicial: 'UDPNetwork' debe seguir siendo 'UDPNetwork'
-        return self.tag[:1].upper() + self.tag[1:]
+    lsb: float = 0.0
+    offset: float = 0.0
 
-    @property
-    def is_container(self) -> bool:
-        return self.kind in CONTAINER_KINDS
 
-    # ------------------------------------------------------------------ #
-    # Acceso genérico a atributos
-    # ------------------------------------------------------------------ #
-    def get(self, attr: str, default: str = "") -> str:
-        return self.attrs.get(attr, default)
+@dataclass
+class EnumScaling(Scaling):
+    """Valor entero -> etiqueta de estado ('0' -> 'UP', '1' -> 'DOWN')."""
 
-    def set(self, attr: str, value: Any) -> None:
-        self.attrs[attr] = str(value)
+    labels: Dict[str, str] = field(default_factory=dict)
 
-    def get_int(self, attr: str, default: int = 0) -> int:
-        raw = self.attrs.get(attr, "")
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return default
 
-    def get_float(self, attr: str, default: float = 0.0) -> float:
-        raw = self.attrs.get(attr, "")
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            return default
+@dataclass
+class LUTRange:
+    begin: float = 0.0
+    end: float = 0.0
+    lsb: float = 0.0
+    offset: float = 0.0
 
-    # ------------------------------------------------------------------ #
-    # Propiedades de conveniencia (las más consultadas en ingeniería)
-    # ------------------------------------------------------------------ #
-    @property
-    def security(self) -> str:
-        return self.get("security")
+
+@dataclass
+class LUTScaling(Scaling):
+    """Calibración por tramos no solapados, cada uno con escalado lineal."""
+
+    ranges: List[LUTRange] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------- #
+# Base común
+# ---------------------------------------------------------------------- #
+@dataclass
+class Entity:
+    id: str = ""
+    name: str = ""
+    security: str = ""
+    remarks: str = ""
+    # Atributos XML no mapeados por el modelo (fidelidad para el writer).
+    extra: Dict[str, str] = field(default_factory=dict)
+    # Metadatos del writer: xsi:type y tag originales.
+    source_type: str = ""
+    source_tag: str = ""
+    parent: Optional["Entity"] = field(default=None, repr=False, compare=False)
 
     @property
-    def coding(self) -> str:
-        return self.get("coding")
+    def children(self) -> List["Entity"]:
+        return []
 
-    @property
-    def length(self) -> int:
-        return self.get_int("length")
-
-    @property
-    def units(self) -> str:
-        return self.get("units")
-
-    @property
-    def period(self) -> int:
-        return self.get_int("period")
-
-    @property
-    def key_selector(self) -> str:
-        return self.get("keySelector")
-
-    @property
-    def national_export_control(self) -> str:
-        return self.attrs.get(
-            "NationalExportControl",
-            self.text_props.get("NationalExportControl", ""),
-        )
-
-    @property
-    def us_export_control(self) -> str:
-        return self.attrs.get(
-            "USExportControl",
-            self.text_props.get("USExportControl", ""),
-        )
-
-    @property
-    def layout(self) -> Dict[str, int]:
-        """Posición física en memoria (palabras de 16/12 bits + offset)."""
-        return {
-            "w16": self.get_int("w16"),
-            "w16_b": self.get_int("w16_b"),
-            "w12": self.get_int("w12"),
-            "w12_b": self.get_int("w12_b"),
-            "maxPosition": self.get_int("maxPosition"),
-            "prePadding": self.get_int("prePadding"),
-        }
-
-    # ------------------------------------------------------------------ #
-    # Navegación
-    # ------------------------------------------------------------------ #
-    @property
-    def folders(self) -> List["ICDNode"]:
-        return [c for c in self.children if c.kind == "Folder"]
-
-    @property
-    def data_elements(self) -> List["ICDNode"]:
-        return [c for c in self.children if c.tag == "data"]
-
-    @property
-    def networks(self) -> List["ICDNode"]:
-        return [c for c in self.children if c.kind.endswith("Network")]
-
-    @property
-    def fields(self) -> List["ICDNode"]:
-        """Campos de layout de una estructura/mensaje (dataField, array, isMember)."""
-        return [c for c in self.children if c.tag in ("dataField", "array", "isMember")]
-
-    @property
-    def owns(self) -> Optional["ICDNode"]:
-        """Entidad contenida inline (declaración in-site), si existe."""
-        for c in self.children:
-            if c.tag == "owns":
-                return c
-        return None
-
-    @property
-    def with_ref(self) -> Optional[Ref]:
-        """La referencia 'with' principal del nodo, si existe."""
-        for r in self.refs:
-            if r.tag == "with":
-                return r
-        return None
-
-    @property
-    def path(self) -> str:
-        """Ruta legible desde la raíz: 'FCS_ICD/Signals/NavBlock'."""
-        parts: List[str] = []
-        node: Optional[ICDNode] = self
-        while node is not None:
-            parts.append(node.name or node.id or node.tag)
-            node = node.parent
-        return "/".join(reversed(parts))
-
-    def walk(self) -> Iterator["ICDNode"]:
-        """Recorre el subárbol completo en profundidad (incluido self)."""
+    def walk(self) -> Iterator["Entity"]:
         yield self
         for child in self.children:
             yield from child.walk()
 
-    def find(
-        self,
-        kind: Optional[str] = None,
-        name: Optional[str] = None,
-        **attr_filters: str,
-    ) -> List["ICDNode"]:
-        """Busca nodos en el subárbol por kind, name y/o atributos exactos."""
-        results = []
-        for node in self.walk():
-            if kind is not None and node.kind != kind:
-                continue
-            if name is not None and node.name != name:
-                continue
-            if any(node.get(k) != v for k, v in attr_filters.items()):
-                continue
-            results.append(node)
-        return results
+    def find(self, cls: Optional[Type] = None, name: Optional[str] = None) -> List["Entity"]:
+        """Busca en el subárbol: find(ScalarType), find(name='NavMsg')."""
+        return [
+            e for e in self.walk()
+            if (cls is None or isinstance(e, cls)) and (name is None or e.name == name)
+        ]
 
-    def find_one(
-        self,
-        kind: Optional[str] = None,
-        name: Optional[str] = None,
-        **attr_filters: str,
-    ) -> Optional["ICDNode"]:
-        matches = self.find(kind=kind, name=name, **attr_filters)
+    def find_one(self, cls: Optional[Type] = None, name: Optional[str] = None) -> Optional["Entity"]:
+        matches = self.find(cls, name)
         return matches[0] if matches else None
 
-    def add_child(self, child: "ICDNode") -> "ICDNode":
-        child.parent = self
-        self.children.append(child)
-        return child
+    @property
+    def path(self) -> str:
+        parts: List[str] = []
+        node: Optional[Entity] = self
+        while node is not None:
+            parts.append(node.name or node.id or type(node).__name__)
+            node = node.parent
+        return "/".join(reversed(parts))
 
-    # ------------------------------------------------------------------ #
-    # Depuración
-    # ------------------------------------------------------------------ #
-    def pretty(self, indent: int = 0) -> str:
-        """Representación en árbol para inspección rápida."""
-        pad = "  " * indent
-        label = f"{pad}{self.kind}"
+    def references(self) -> List[Reference]:
+        """Enlaces salientes de esta entidad (para el resolver del registro)."""
+        return []
+
+    def _label(self) -> str:
+        label = type(self).__name__
         if self.name:
             label += f" '{self.name}'"
-        if self.id:
-            label += f" [{self.id}]"
-        extras = []
-        for r in self.refs:
-            state = "->" if r.is_resolved else "-?>"
-            target = r.target.name if r.target else (r.href or r.ref_id)
-            extras.append(f"{r.tag}{state}{target}")
-        if extras:
-            label += "  (" + ", ".join(extras) + ")"
-        lines = [label]
+        refs = []
+        for r in self.references():
+            arrow = "->" if r.is_resolved else "-?>"
+            refs.append(f"{r.role}{arrow}{r.target.name if r.target else r.href}")
+        if refs:
+            label += "  (" + ", ".join(refs) + ")"
+        return label
+
+    def pretty(self, indent: int = 0) -> str:
+        lines = ["  " * indent + self._label()]
         for child in self.children:
             lines.append(child.pretty(indent + 1))
         return "\n".join(lines)
 
-    def __repr__(self) -> str:  # repr corto: el de dataclass es inmanejable
-        return f"<{self.kind} '{self.name}' id={self.id!r}>"
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} '{self.name}' id={self.id!r}>"
+
+
+# ---------------------------------------------------------------------- #
+# Sistema de tipos
+# ---------------------------------------------------------------------- #
+@dataclass
+class TypeDef(Entity):
+    """Definición de tipo reutilizable. Base concreta: los tipos aún no
+    modelados se instancian como TypeDef y conservan todo en ``extra``."""
+
+
+@dataclass
+class ScalarType(TypeDef):
+    """Valor numérico codificado sobre N bits."""
+
+    bit_length: int = 0
+    encoding: str = ""              # twoComplement, BCD, IEEE754, ASCII...
+    default_value: str = ""
+    scaling: Optional[Scaling] = None
+
+    @property
+    def units(self) -> str:
+        return self.scaling.units if self.scaling else ""
+
+
+@dataclass
+class TextType(TypeDef):
+    """Cadena de texto, de longitud fija o variable."""
+
+    max_chars: int = 0
+    length_mode: str = ""           # 'fixed' | 'variable'
+    encoding: str = ""              # ASCII, UTF8...
+    bit_endianness: str = ""
+
+
+@dataclass
+class Field(Entity):
+    """Hueco dentro de un tipo compuesto.
+
+    El tipo que lo ocupa viene o por referencia a una definición compartida
+    (``ref``) o definido inline aquí mismo (``inline``).
+    ``condition`` lo usan las variantes: valor del discriminador que activa
+    este campo (campo condicional).
+    """
+
+    position: BitPosition = field(default_factory=BitPosition)
+    ref: Optional[Reference] = None
+    inline: Optional[TypeDef] = None
+    condition: str = ""
+
+    @property
+    def is_conditional(self) -> bool:
+        return self.condition != ""
+
+    @property
+    def datatype(self) -> Optional[TypeDef]:
+        """La definición de tipo de este campo, venga inline o por referencia."""
+        if self.inline is not None:
+            return self.inline
+        if self.ref is not None and isinstance(self.ref.target, TypeDef):
+            return self.ref.target
+        return None
+
+    @property
+    def children(self) -> List[Entity]:
+        return [self.inline] if self.inline is not None else []
+
+    def references(self) -> List[Reference]:
+        return [self.ref] if self.ref is not None else []
+
+
+@dataclass
+class CompositeType(TypeDef):
+    """Tipo con campos."""
+
+    fields: List[Field] = field(default_factory=list)
+
+    @property
+    def children(self) -> List[Entity]:
+        return list(self.fields)
+
+
+@dataclass
+class RecordType(CompositeType):
+    """Registro: secuencia de campos en posiciones fijas."""
+
+    bit_length: int = 0
+
+
+@dataclass
+class ArrayType(CompositeType):
+    """Lista de longitud variable: el nº de elementos lo da un contador
+    transmitido en el propio mensaje. Sus ``fields`` describen el elemento."""
+
+    counter_type: str = ""
+    counter_bits: int = 0
+    max_count: int = 0
+
+
+@dataclass
+class VariantType(CompositeType):
+    """Payloads alternativos multiplexados por un campo discriminador.
+
+    Cada campo con ``condition`` es una alternativa: se transmite cuando el
+    discriminador vale ``condition``.
+    """
+
+    discriminator: str = ""
+
+    @property
+    def cases(self) -> List[Field]:
+        return [f for f in self.fields if f.is_conditional]
+
+
+# ---------------------------------------------------------------------- #
+# Transmisión
+# ---------------------------------------------------------------------- #
+@dataclass
+class Message(Entity):
+    """Mensaje transmisible: payload + características temporales."""
+
+    period: int = 0
+    rate_mode: str = ""
+    payload: Optional[Reference] = None     # tipo definido en otro sitio...
+    body: Optional[RecordType] = None       # ...o registro definido inline
+
+    @property
+    def structure(self) -> Optional[TypeDef]:
+        if self.body is not None:
+            return self.body
+        if self.payload is not None and isinstance(self.payload.target, TypeDef):
+            return self.payload.target
+        return None
+
+    @property
+    def children(self) -> List[Entity]:
+        return [self.body] if self.body is not None else []
+
+    def references(self) -> List[Reference]:
+        return [self.payload] if self.payload is not None else []
+
+
+@dataclass
+class Port(Entity):
+    number: int = 0
+    role: str = ""
+    ip_address: str = ""
+    send: str = ""
+    receive: str = ""
+
+
+@dataclass
+class MessageSlot(Entity):
+    """Ranura de transmisión de un mensaje concreto dentro de un bus."""
+
+    period: int = 0
+    rate_mode: str = ""
+    multicast_ip: str = ""
+    max_peak_rate: int = 0
+    message: Optional[Reference] = None
+
+    def references(self) -> List[Reference]:
+        return [self.message] if self.message is not None else []
+
+
+@dataclass
+class Bus(Entity):
+    coding: str = ""
+    speed: str = ""
+    slots: List[MessageSlot] = field(default_factory=list)
+
+    @property
+    def children(self) -> List[Entity]:
+        return list(self.slots)
+
+
+@dataclass
+class Network(Entity):
+    protocol: str = ""                      # "UDP" | "TCP"
+    ports: List[Port] = field(default_factory=list)
+    buses: List[Bus] = field(default_factory=list)
+
+    @property
+    def children(self) -> List[Entity]:
+        return [*self.ports, *self.buses]
+
+
+# ---------------------------------------------------------------------- #
+# Organización
+# ---------------------------------------------------------------------- #
+@dataclass
+class Folder(Entity):
+    folders: List["Folder"] = field(default_factory=list)
+    types: List[TypeDef] = field(default_factory=list)
+    messages: List[Message] = field(default_factory=list)
+
+    @property
+    def children(self) -> List[Entity]:
+        return [*self.folders, *self.types, *self.messages]
+
+
+@dataclass
+class Module(Folder):
+    """Raíz: unidad de información bajo control de configuración."""
+
+    networks: List[Network] = field(default_factory=list)
+    national_export_control: str = ""
+    us_export_control: str = ""
+    explicit_national_ec: Optional[Reference] = None
+    explicit_us_ec: Optional[Reference] = None
+    # Metadatos del archivo origen (para el writer).
+    source_file: str = ""
+    nsmap: Dict[str, str] = field(default_factory=dict)
+
+    @property
+    def children(self) -> List[Entity]:
+        return [*self.folders, *self.types, *self.messages, *self.networks]
+
+    def references(self) -> List[Reference]:
+        return [r for r in (self.explicit_national_ec, self.explicit_us_ec) if r is not None]

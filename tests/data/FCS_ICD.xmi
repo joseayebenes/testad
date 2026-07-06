@@ -11,11 +11,22 @@
 
   <folder id="_f_signals" name="Signals" security="UNCLAS">
     <data xsi:type="Data:Signal" id="_sig_speed" name="AirSpeed"
-          length="16" coding="twoComplement" units="kt" security="UNCLAS"/>
+          length="16" coding="twoComplement" security="UNCLAS" UniqueID="FCS-001">
+      <scal xsi:type="Scal:Lineal" lsb="0.0625" offset="0" units="kt"/>
+    </data>
+    <data xsi:type="Data:Signal" id="_sig_gear" name="GearStatus" length="2" coding="twoComplement">
+      <scal xsi:type="Scal:Enums">
+        <tag value="0" name="UP"/>
+        <tag value="1" name="DOWN"/>
+        <tag value="2" name="TRANSIT"/>
+      </scal>
+    </data>
     <data xsi:type="Data:TextSignal" id="_sig_callsign" name="CallSign"
           lengthType="fixed" textLength="8" coding="ASCII" bitEndianness="big"/>
     <data xsi:type="Data:VariableArray" id="_arr_waypoints" name="Waypoints"
-          counterType="uint8" counterSize="8" maxLength="32"/>
+          counterType="uint8" counterSize="8" maxLength="32">
+      <dataField id="_df_wp" name="waypoint" w16="0" w16_b="0" with="_sig_speed"/>
+    </data>
   </folder>
 
   <folder id="_f_messages" name="Messages">
@@ -49,5 +60,4 @@
   </IP:UDPNetwork>
 
   <explicitNational_EC href="ExportRules.xmi#_ec_es"/>
-  <NationalExportControl>ES:DUAL</NationalExportControl>
 </Module:Module>
