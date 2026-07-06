@@ -17,6 +17,7 @@ de la herramienta será en JSON, por lo que el modelo no arrastra ningún
 metadato del XML (namespaces, atributos crudos, xsi:types...).
 
 ```
+main.py          CLI: carga todos los ICD de una carpeta y muestra resultados
 core/
   model.py       Modelo de dominio (sistema de tipos + transmisión + organización)
   parser.py      Traductor XMI -> modelo (stdlib xml.etree, sin dependencias)
@@ -54,7 +55,23 @@ tests/
 (arquitectura de comunicaciones), `Module`/`Folder` (organización y control
 de configuración, con control de exportación militar).
 
-## Uso
+## CLI
+
+Carga todos los `.module`/`.xmi`/`.xml` de una carpeta (recursivo), resuelve
+las referencias entre ellos y muestra el resultado:
+
+```bash
+python3 main.py <carpeta>                  # resumen + validación + referencias
+python3 main.py <carpeta> --tree           # además, el árbol de cada módulo
+python3 main.py <carpeta> --describe NavMsg # ficha de un mensaje/tipo
+python3 main.py <carpeta> --quiet          # sin logs de progreso del parser
+```
+
+Importante: para que las referencias `href` cruzadas se resuelvan, todos los
+ficheros referenciados deben estar en la carpeta (p. ej. cargar `JREAP_IM`
+**y** `JREAP_Signals.module` juntos).
+
+## Uso programático
 
 ```python
 from core.parser import ICDParser
