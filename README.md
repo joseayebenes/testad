@@ -207,4 +207,5 @@ Flujo típico: cargar XML → editar en memoria → `save_module` (JSON) →
 - [x] Fase 1-2: modelo de dominio + parser + registro
 - [x] Fase 3: persistencia en JSON (guardar/cargar el modelo)
 - [x] Fase 4a: interfaz web (NiceGUI) — navegar y editar
-- [ ] Fase 4b: generación de código desde el modelo
+- [ ] Fase 4b: generación de código (Jinja2 → Ada/Python) — ver
+  [`docs/codegen_spec.md`](docs/codegen_spec.md)
