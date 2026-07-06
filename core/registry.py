@@ -63,6 +63,21 @@ class ICDRegistry:
                 self._by_id[entity.id] = entity
             file_index[entity.id] = entity
 
+    def index_entity(self, entity: Entity, source_file: str) -> None:
+        """Registra una entidad nueva (creada en la UI) por su id."""
+        if not entity.id:
+            return
+        self._by_id.setdefault(entity.id, entity)
+        self._by_file.setdefault(source_file, {})[entity.id] = entity
+
+    def deindex(self, entity: Entity, source_file: str) -> None:
+        """Elimina una entidad del índice (borrada en la UI)."""
+        if self._by_id.get(entity.id) is entity:
+            del self._by_id[entity.id]
+        file_index = self._by_file.get(source_file)
+        if file_index and file_index.get(entity.id) is entity:
+            del file_index[entity.id]
+
     # ------------------------------------------------------------------ #
     # Consulta
     # ------------------------------------------------------------------ #

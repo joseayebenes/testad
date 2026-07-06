@@ -61,7 +61,7 @@ class ICDApp:
         # refs a componentes que se refrescan
         self.tree: Optional[ui.tree] = None
         self.status_label: Optional[ui.label] = None
-        self.detail_container: Optional[ui.column] = None
+        self.detail_view = None  # ui.refreshable, creado en build()
 
     # ================================================================== #
     # Construcción del árbol (lazy)
@@ -139,9 +139,13 @@ class ICDApp:
         return out
 
     def _render_detail(self) -> None:
-        self.detail_container.clear()
+        """Refresca el panel de detalle (seguro desde cualquier handler)."""
+        if self.detail_view is not None:
+            self.detail_view.refresh()
+
+    def _render_detail_body(self) -> None:
         entity = self.selected
-        with self.detail_container:
+        with ui.column().classes("w-full gap-2"):
             if entity is None:
                 ui.label("Selecciona una entidad en el árbol.").classes("text-grey")
                 return
@@ -149,7 +153,10 @@ class ICDApp:
             ui.label(f"{type(entity).__name__}  ·  {entity.path}").classes(
                 "text-sm text-grey-7"
             )
-            ui.label(entity.name or "(sin nombre)").classes("text-h6")
+            with ui.row().classes("items-center w-full"):
+                ui.label(entity.name or "(sin nombre)").classes("text-h6")
+                ui.space()
+                self._action_bar(entity)
 
             # --- atributos editables ---
             with ui.card().classes("w-full"):
@@ -159,12 +166,10 @@ class ICDApp:
                         self._attr_input(entity, f)
 
             # --- referencias ---
-            refs = entity.references()
-            if refs:
+            if self.session.reference_slots(entity) or entity.references():
                 with ui.card().classes("w-full"):
                     ui.label("Referencias").classes("text-bold")
-                    for ref in refs:
-                        self._ref_row(ref)
+                    self._render_references(entity)
 
             # --- layout / describe ---
             describe = getattr(entity, "describe", None)
@@ -182,6 +187,57 @@ class ICDApp:
                         color = "negative" if issue.level == "ERROR" else "warning"
                         ui.label(f"{issue.level}: {issue.message}").classes(f"text-{color}")
 
+    def _action_bar(self, entity: Entity) -> None:
+        """Botones de crear hijo / borrar para la entidad seleccionada."""
+        allowed = self.session.allowed_children(entity)
+        if allowed:
+            with ui.button("Añadir", icon="add").props("dense"):
+                with ui.menu() as menu:
+                    for label, cls in allowed.items():
+                        ui.menu_item(label, on_click=lambda c=cls: self._add_child(entity, c, menu))
+        if entity.parent is not None and not isinstance(entity, Module):
+            ui.button("Borrar", icon="delete", color="negative",
+                      on_click=lambda: self._delete(entity)).props("dense")
+
+    def _add_child(self, parent: Entity, cls: type, menu) -> None:
+        menu.close()
+        try:
+            new = self.session.add_child(parent, cls)
+        except ValueError as exc:
+            ui.notify(str(exc), type="negative")
+            return
+        self._rebuild_branch(parent)
+        self._refresh_status()
+        self._goto(new)
+        ui.notify(f"Creado {cls.__name__} '{new.name}'", type="positive")
+
+    def _delete(self, entity: Entity) -> None:
+        parent = entity.parent
+        dangling = self.session.delete(entity)
+        self._rebuild_branch(parent)
+        self.selected = parent
+        self._refresh_status()
+        self._render_detail()
+        msg = f"Borrado '{entity.name}'"
+        if dangling:
+            msg += f" · {len(dangling)} referencias quedaron sin resolver"
+        ui.notify(msg, type="warning" if dangling else "positive")
+
+    def _rebuild_branch(self, parent: Entity) -> None:
+        """Repuebla los hijos de 'parent' en el árbol tras crear/borrar."""
+        node_id = self._node_id(parent)
+        self._loaded.discard(node_id)
+        # el nodo padre debe tener el arreglo de hijos actualizado
+        children = [self._make_shell(c) for c in parent.children]
+        self._loaded.add(node_id)
+        if not self._replace_children(self.tree.props["nodes"], node_id, children):
+            # el padre es una raíz (módulo): reconstruir nodos raíz
+            self.tree.props["nodes"] = self._root_nodes_keeping()
+        self.tree.update()
+
+    def _root_nodes_keeping(self) -> list:
+        return [self._make_shell(m) for m in self.session.modules]
+
     def _attr_input(self, entity: Entity, f: dataclasses.Field) -> None:
         value = getattr(entity, f.name)
         label = f.name
@@ -196,17 +252,73 @@ class ICDApp:
             )
         comp.classes("w-full")
 
-    def _ref_row(self, ref: Reference) -> None:
+    def _render_references(self, entity: Entity) -> None:
+        """Referencias editables: cambiar destino, limpiar, o asignar si falta."""
+        slots = self.session.reference_slots(entity)
+        if not slots:
+            # entidades con referencias no editables (p. ej. no en _REFERENCE_SLOTS)
+            for ref in entity.references():
+                self._ref_row_readonly(ref)
+            return
+        for attr, role, ref in slots:
+            with ui.row().classes("items-center gap-2 w-full"):
+                if ref is not None and ref.is_resolved:
+                    ui.icon("link", color="positive")
+                    ui.label(f"{role} → {ref.target.name}  [{ref.href}]")
+                    ui.button("ir", on_click=lambda t=ref.target: self._goto(t)).props("flat dense")
+                elif ref is not None:
+                    ui.icon("link_off", color="negative")
+                    ui.label(f"{role} → {ref.href}  (sin resolver)").classes("text-negative")
+                else:
+                    ui.icon("link_off", color="grey")
+                    ui.label(f"{role}: sin asignar").classes("text-grey")
+                ui.space()
+                ui.button(icon="edit", on_click=lambda e=entity, a=attr: self._open_ref_picker(e, a)).props("flat dense round")
+                if ref is not None:
+                    ui.button(icon="delete", color="negative",
+                              on_click=lambda e=entity, a=attr: self._clear_ref(e, a)).props("flat dense round")
+
+    def _ref_row_readonly(self, ref: Reference) -> None:
         with ui.row().classes("items-center gap-2"):
             if ref.is_resolved:
                 ui.icon("link", color="positive")
                 ui.label(f"{ref.role} → {ref.target.name}  [{ref.href}]")
-                ui.button(
-                    "ir", on_click=lambda t=ref.target: self._goto(t)
-                ).props("flat dense")
+                ui.button("ir", on_click=lambda t=ref.target: self._goto(t)).props("flat dense")
             else:
                 ui.icon("link_off", color="negative")
                 ui.label(f"{ref.role} → {ref.href}  (sin resolver)").classes("text-negative")
+
+    def _clear_ref(self, entity: Entity, attr: str) -> None:
+        self.session.clear_reference(entity, attr)
+        self._refresh_status()
+        self._render_detail()
+
+    def _open_ref_picker(self, entity: Entity, attr: str) -> None:
+        """Diálogo con búsqueda para elegir la entidad destino de la referencia."""
+        with ui.dialog() as dialog, ui.card().classes("w-96"):
+            ui.label(f"Asignar referencia · {attr}").classes("text-bold")
+            search = ui.input("buscar entidad por nombre").props("dense autofocus clearable").classes("w-full")
+            results = ui.column().classes("w-full")
+
+            def do_search():
+                results.clear()
+                with results:
+                    matches = self.session.search(search.value or "")
+                    if not matches:
+                        ui.label("sin coincidencias").classes("text-grey")
+                    for target in matches[:40]:
+                        def pick(t=target):
+                            self.session.set_reference(entity, attr, t)
+                            dialog.close()
+                            self._refresh_status()
+                            self._render_detail()
+                            ui.notify(f"Referencia → {t.name}", type="positive")
+                        ui.button(f"{type(target).__name__}: {target.name}  ({target.path})",
+                                  on_click=pick).props("flat dense align-left").classes("w-full")
+            search.on("keydown.enter", lambda _: do_search())
+            search.on("input", lambda _: do_search())
+            ui.button("cerrar", on_click=dialog.close).props("flat")
+        dialog.open()
 
     def _goto(self, entity: Entity) -> None:
         self.selected = entity
@@ -220,7 +332,7 @@ class ICDApp:
         for nid in reversed(chain):
             self._populate(nid)
         self.tree.props["expanded"] = chain
-        self.tree._props["selected"] = node_id  # type: ignore[attr-defined]
+        self.tree.props["selected"] = node_id
         self.tree.update()
         self._render_detail()
 
@@ -316,9 +428,10 @@ class ICDApp:
                         </div>
                     ''')
             with splitter.after:
-                self.detail_container = ui.column().classes("w-full p-3 gap-2")
+                with ui.column().classes("w-full p-3"):
+                    self.detail_view = ui.refreshable(self._render_detail_body)
+                    self.detail_view()
 
-        self._render_detail()
         self._refresh_status()
 
 

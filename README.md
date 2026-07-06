@@ -32,6 +32,7 @@ tests/
   test_parser.py
   test_validation.py
   test_persistence.py
+  test_session.py     lógica de edición de la web (crear/borrar/referencias)
 ```
 
 ## El modelo
@@ -88,6 +89,15 @@ errores/avisos) · árbol de módulos con expansión perezosa y búsqueda ·
 ficha de la entidad seleccionada con atributos editables, referencias
 (navegables), layout (`describe()`) e incidencias de validación. Cada
 edición revalida el modelo al instante y actualiza los contadores.
+
+Edición estructural:
+
+* **Crear** entidades con el botón *Añadir* (los tipos válidos dependen del
+  contenedor: señales/registros/mensajes en una carpeta, campos en un
+  registro, puertos/buses en una red...).
+* **Borrar** entidades; se avisa de las referencias que quedan colgando.
+* **Editar referencias** (`with`, payload...) con un selector de búsqueda
+  que enlaza incluso entre módulos distintos.
 
 La lógica vive en `web/session.py` (`WorkSession`), que envuelve `core/`
 sin depender de NiceGUI, así que es testeable sin navegador.
