@@ -8,8 +8,9 @@ dominio (`core/model.py`).
 > Decisiones tomadas por defecto (marcadas como **[D-n]**) a la espera de tu
 > confirmación. Si tu norma difiere, se ajusta el diseño en consecuencia.
 >
-> - **[D-1] Perfil Ada**: Ada 2012 con restricciones de aviónica (sin
->   asignación dinámica, tipos con rango y representación explícita).
+> - **[D-1] Perfil Ada**: **Ada 95** (CONFIRMADO por el usuario). Sin
+>   asignación dinámica, tipos con rango y **cláusulas de representación**
+>   (no *aspects*). Ver la sección 2.7 (restricciones de Ada 95).
 > - **[D-2] Separación de dependencias**: por capas + un fichero por elemento,
 >   con dependencias explícitas y unidireccionales.
 > - **[D-3] Alcance del primer generador**: empaquetado/desempaquetado
@@ -86,10 +87,11 @@ deben cumplirlas y habrá comprobaciones automáticas donde sea posible.
 - La generación **exige que el modelo valide sin errores** (`validate_module`);
   si hay errores se aborta con un informe (los avisos no bloquean, se listan).
 - No se genera código para referencias sin resolver.
-- **[D-1]** En Ada: sin asignación dinámica, tipos con rango explícito,
-  cláusulas de representación para el layout de bits, `Scalar_Storage_Order`
-  para el endianness. En SPARK (si se elige) además contratos y ausencia de
-  efectos laterales.
+- **[D-1]** En Ada 95: sin asignación dinámica, tipos con rango explícito, y
+  cláusulas de representación para el layout de bits. El **endianness** se
+  controla de forma explícita en el runtime de bit I/O (L0), **no** con
+  `Scalar_Storage_Order` (no existe en Ada 95): el encode/decode portable
+  escribe/lee campo a campo en el orden de bits indicado por el ICD.
 - En Python: `from __future__ import annotations`, *type hints* completos, sin
   efectos laterales en import, empaquetado con operaciones de bits de la stdlib
   (sin dependencias externas).
@@ -102,6 +104,29 @@ deben cumplirlas y habrá comprobaciones automáticas donde sea posible.
 - Las **colisiones** se resuelven con sufijo estable derivado del `xmi:id`.
 - Convención por lenguaje: Ada `Pascal_Snake` para tipos/paquetes; Python
   `snake_case` para funciones/campos y `PascalCase` para clases.
+
+### 2.7 Restricciones de Ada 95  **[D-1]**
+
+El código Ada generado debe compilar como **Ada 95** (`-gnat95`). En
+particular:
+
+- **Nada de sintaxis de *aspects*** (`with Size => …`, `with Pack`, …), que es
+  de Ada 2012. Se usan **cláusulas de representación** y **pragmas**:
+  `for T'Size use N;`, `for R use record … end record;`,
+  `for T use (Lit => Val, …);`, `pragma Pack (…);`.
+- **Sin `Scalar_Storage_Order`** (no existe en Ada 95). El endianness se
+  resuelve en el runtime de bit I/O (L0), no delegándolo al compilador.
+- **Sin expresiones condicionales/`case`** (`(if … then …)`), sin
+  `return` extendido, sin tipos `interface`, sin `Ada.Containers`: todo eso es
+  Ada 2005/2012. La lógica generada usa sentencias clásicas.
+- **Librería estándar conservadora**: `Ada.Streams`, `System`,
+  `System.Storage_Elements`, `Unchecked_Conversion` y poco más. Nada que
+  requiera Ada 2005+.
+- **Paquetes hijos** (jerárquicos) SÍ están disponibles en Ada 95 → se usan
+  para reflejar la estructura por capas (p. ej. `FCS_ICD.Types`,
+  `FCS_ICD.Nav_Msg`).
+- Tipos **modulares** (`mod 2**N`) y **representación de enumerados** SÍ existen
+  en Ada 95 → se usan para unsigned y para los enum de escalado.
 
 ## 3. Arquitectura del generador
 
@@ -148,10 +173,10 @@ Fuente: las entidades de `core/model.py`.
 
 ### 4.1 Escalares (`ScalarType`)
 
-| Aspecto | Ada **[D-1]** | Python |
+| Aspecto | Ada 95 **[D-1]** | Python |
 |--------|----------------|--------|
-| Tipo base | `type T is range Lo .. Hi` (con signo) o `mod 2**N` | `int` (con validación de rango) |
-| Tamaño | `for T'Size use N;` | — (se controla en pack/unpack) |
+| Tipo base | `type T is range Lo .. Hi;` (con signo) o `type T is mod 2**N;` | `int` (con validación de rango) |
+| Tamaño | cláusula `for T'Size use N;` | — (se controla en pack/unpack) |
 | Codificación | twoComplement→signed; unsigned→modular; IEEE754→`Float`/`Long_Float`; BCD/ASCII→helpers de runtime | ídem, en funciones de pack |
 | Valor por defecto | constante `Default : constant T := …;` | constante de módulo |
 
@@ -164,10 +189,13 @@ Fuente: las entidades de `core/model.py`.
 
 ### 4.3 Registros (`RecordType`)
 
-- Ada: `record … end record` **con cláusula de representación** que fija cada
-  campo a sus bits (`for R use record F at Byte range Lo .. Hi; …`), usando la
-  posición del modelo (`max_position`, `w16/w12`). `Bit_Order` y
-  `Scalar_Storage_Order` para el endianness.
+- Ada 95: `record … end record`, opcionalmente con **cláusula de
+  representación** (`for R use record F at Byte range Lo .. Hi; …` y
+  `for R'Bit_Order use …;`) como mapeo nativo/documentación, usando la posición
+  del modelo (`max_position`, `w16/w12`). El **encode/decode portable** no se
+  apoya en el layout del compilador (no hay `Scalar_Storage_Order` en Ada 95):
+  escribe/lee cada campo con el runtime de bit I/O en el orden indicado por el
+  ICD, garantizando el endianness de forma explícita.
 - Python: `@dataclass` con los campos tipados; el layout de bits vive en las
   funciones `pack`/`unpack` (no en la clase).
 
@@ -291,8 +319,8 @@ Reglas comprobables:
 
 ## 10. Decisiones a confirmar
 
-- **[D-1]** Perfil Ada: *Ada 2012 + restricciones de aviónica* (asumido) /
-  SPARK 2014 / Ada 2012 estándar.
+- **[D-1]** Perfil Ada: **Ada 95** (confirmado). Compilación con `-gnat95`;
+  restricciones en la sección 2.7.
 - **[D-2]** Separación de dependencias: *capas + un fichero por elemento*
   (asumido) / un fichero por módulo / énfasis en generado-vs-a-mano.
 - **[D-3]** Alcance inicial: *empaquetado/desempaquetado + tipos* (asumido);
