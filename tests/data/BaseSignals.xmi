@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module:Module xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:Module="http://www.ads.org/model/Module"
+    xmlns:Data="http://www.ads.org/icdms/Data"
+    id="_mod_base" name="BaseSignals">
+
+  <folder id="_f_base" name="Common">
+    <data xsi:type="Data:Signal" id="_sig_alt" name="Altitude"
+          length="24" coding="twoComplement" units="ft"/>
+  </folder>
+</Module:Module>

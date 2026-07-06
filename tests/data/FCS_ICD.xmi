@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module:Module xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:Module="http://www.ads.org/model/Module"
+    xmlns:Data="http://www.ads.org/icdms/Data"
+    xmlns:Scal="http://www.ads.org/icdms/Scal"
+    xmlns:IP="http://www.ads.org/icdms/IP"
+    id="_mod_fcs" name="FCS_ICD"
+    NationalExportControl="ES:DUAL" USExportControl="NONE:null">
+
+  <folder id="_f_signals" name="Signals" security="UNCLAS">
+    <data xsi:type="Data:Signal" id="_sig_speed" name="AirSpeed"
+          length="16" coding="twoComplement" units="kt" security="UNCLAS"/>
+    <data xsi:type="Data:TextSignal" id="_sig_callsign" name="CallSign"
+          lengthType="fixed" textLength="8" coding="ASCII" bitEndianness="big"/>
+    <data xsi:type="Data:VariableArray" id="_arr_waypoints" name="Waypoints"
+          counterType="uint8" counterSize="8" maxLength="32"/>
+  </folder>
+
+  <folder id="_f_messages" name="Messages">
+    <folder id="_f_nav" name="Navigation">
+      <data xsi:type="Data:Structure" id="_st_navblock" name="NavBlock" length="48">
+        <dataField id="_df_speed" name="speedField" w16="0" w16_b="0" with="_sig_speed"/>
+        <dataField id="_df_alt" name="altField" w16="1" w16_b="0">
+          <with xsi:type="Data:Signal" href="BaseSignals.xmi#_sig_alt"/>
+        </dataField>
+        <dataField id="_df_counter" name="counterField" w16="2" w16_b="0">
+          <owns xsi:type="Data:Signal" id="_own_counter" name="frameCounter"
+                length="8" coding="twoComplement"/>
+        </dataField>
+      </data>
+      <data xsi:type="Data:Header" id="_hdr_nav" name="NavHeader" key="opcode">
+        <isMember id="_mem_nav" keySelector="1" with="_st_navblock"/>
+      </data>
+      <data xsi:type="Data:Message" id="_msg_nav" name="NavMsg"
+            period="40" rateMode="periodic" with="_st_navblock"/>
+    </folder>
+  </folder>
+
+  <IP:UDPNetwork id="_net_avionics" name="AvionicsLAN" security="UNCLAS" alias="LAN-A">
+    <port id="_p_nav" name="navPort" port="5001" role="server"
+          ipAddress="10.0.0.1" send="true" receive="false"/>
+    <bus id="_b_eth" coding="ETH">
+      <owns id="_own_bus" speed="100" name="mainBus"/>
+      <message id="_bm_nav" period="40" rateMode="periodic"
+               multicastIP="224.0.0.5" maxPeakRate="25" with="_msg_nav"/>
+    </bus>
+  </IP:UDPNetwork>
+
+  <explicitNational_EC href="ExportRules.xmi#_ec_es"/>
+  <NationalExportControl>ES:DUAL</NationalExportControl>
+</Module:Module>
