@@ -18,12 +18,14 @@ metadato del XML (namespaces, atributos crudos, xsi:types...).
 
 ```
 core/
-  model.py     Modelo de dominio (sistema de tipos + transmisión + organización)
-  parser.py    Traductor XMI -> modelo (stdlib xml.etree, sin dependencias)
-  registry.py  Índice global por id + resolución de referencias entre archivos
+  model.py       Modelo de dominio (sistema de tipos + transmisión + organización)
+  parser.py      Traductor XMI -> modelo (stdlib xml.etree, sin dependencias)
+  registry.py    Índice global por id + resolución de referencias entre archivos
+  validation.py  Validador: campos obligatorios, solapamientos, refs rotas...
 tests/
-  data/        XMIs de ejemplo fieles al formato de producción
+  data/          XMIs de ejemplo fieles al formato de producción
   test_parser.py
+  test_validation.py
 ```
 
 ## El modelo
@@ -73,6 +75,25 @@ speed.bit_length = 32                    # edición pythónica en memoria
 
 for msg in module.find(Message):
     print(msg.name, msg.period, msg.structure.name)
+    print(msg.describe())                # ficha completa del layout
+```
+
+### Validación
+
+Tras cargar y resolver, `validate_module()` recorre el modelo y registra
+en el log (y devuelve como lista de `Issue`) cualquier problema: campos
+obligatorios ausentes, arrays sin contador, variantes sin discriminador o
+con condiciones duplicadas, campos vacíos o solapados, mensajes sin
+payload, ids duplicados y referencias sin resolver.
+
+```python
+from core.validation import validate_module, summarize
+
+issues = validate_module(module)
+print(summarize(issues))
+# Validación: 8 errores, 6 avisos
+#   [ERROR] Broken_ICD/Bad/NoLength: señal sin longitud en bits ...
+#   [WARNING] Broken_ICD/Bad/Overlap: 2 campos solapados en la posición w16 0:0
 ```
 
 ## Tests
