@@ -185,14 +185,13 @@ class ICDApp:
                     ui.label("Layout").classes("text-bold")
                     ui.code(entity.describe()).classes("w-full").style("white-space:pre-wrap")
 
-            # --- incidencias de esta entidad ---
+            # --- incidencias de esta entidad y su subárbol ---
             issues = self.session.issues_for(entity)
             if issues:
                 with ui.card().classes("w-full"):
                     ui.label(f"Incidencias ({len(issues)})").classes("text-bold")
                     for issue in issues:
-                        color = "negative" if issue.level == "ERROR" else "warning"
-                        ui.label(f"{issue.level}: {issue.message}").classes(f"text-{color}")
+                        self._issue_row(issue, entity)
 
     def _action_bar(self, entity: Entity) -> None:
         """Botones de crear hijo / borrar para la entidad seleccionada."""
@@ -324,6 +323,23 @@ class ICDApp:
                     .props("flat dense round size=sm").tooltip("ir a la referencia")
         else:
             ui.element("div").style("border-bottom:1px solid rgba(0,0,0,.06);")
+
+    def _issue_row(self, issue, current: Entity) -> None:
+        """Una incidencia con enlace a la entidad afectada."""
+        color = "negative" if issue.level == "ERROR" else "warning"
+        target = self.session.resolve_issue_target(issue)
+        with ui.row().classes("items-center w-full no-wrap gap-2"):
+            ui.icon("error" if issue.level == "ERROR" else "warning", color=color, size="18px")
+            with ui.column().classes("gap-0"):
+                ui.label(issue.message).classes(f"text-{color} text-sm")
+                # ruta relativa a la entidad actual, para ubicar la incidencia
+                if issue.path != current.path:
+                    ui.label(issue.path).classes("text-xs text-grey-6")
+            ui.space()
+            # enlace: solo si la entidad afectada existe y no es la ya seleccionada
+            if target is not None and target is not current:
+                ui.button(icon="north_east", on_click=lambda t=target: self._goto(t)) \
+                    .props("flat dense round size=sm").tooltip("ir al elemento")
 
     def _toggle_collapse(self, key: str) -> None:
         if key in self._collapsed:

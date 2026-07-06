@@ -40,6 +40,7 @@ class Issue:
     level: str
     path: str
     message: str
+    entity_id: str = ""      # id de la entidad afectada (para enlazar en la UI)
 
     def __str__(self) -> str:
         return f"[{self.level}] {self.path}: {self.message}"
@@ -61,7 +62,7 @@ class Validator:
 
     # ------------------------------------------------------------------ #
     def _add(self, level: str, entity: Entity, message: str) -> None:
-        issue = Issue(level, entity.path, message)
+        issue = Issue(level, entity.path, message, entity.id)
         self.issues.append(issue)
         log = logger.error if level == ERROR else logger.warning
         log("%s: %s", issue.path, issue.message)

@@ -111,6 +111,22 @@ class WorkSession:
     def get(self, entity_id: str) -> Optional[Entity]:
         return self._index.get(entity_id)
 
+    def find_by_path(self, path: str) -> Optional[Entity]:
+        """Localiza una entidad por su ruta (fallback cuando no tiene id)."""
+        for module in self.registry.modules:
+            for entity in module.walk():
+                if entity.path == path:
+                    return entity
+        return None
+
+    def resolve_issue_target(self, issue) -> Optional[Entity]:
+        """Entidad afectada por una incidencia: por id, o por ruta si no hay id."""
+        if getattr(issue, "entity_id", ""):
+            found = self.get(issue.entity_id)
+            if found is not None:
+                return found
+        return self.find_by_path(issue.path)
+
     def search(self, needle: str, limit: int = 50) -> List[Entity]:
         needle = needle.lower().strip()
         if not needle:
