@@ -73,6 +73,28 @@ def test_scalar_with_enum_scaling():
     assert gear.scaling.labels == {"0": "UP", "1": "DOWN", "2": "TRANSIT"}
 
 
+def test_real_nested_scaling_format():
+    """Formato real EMF: <scal> sin tipo que envuelve <owns xsi:type="Scal:..">.
+    Cubre lineal, enum y LUT (con <metaData> a ignorar)."""
+    from core.model import LinearScaling, LUTScaling
+    registry = ICDRegistry()
+    parser = ICDParser(registry)
+    nested = parser.parse_file(os.path.join(DATA_DIR, "Nested.xmi"))
+    registry.resolve_references()
+
+    temp = nested.find_one(ScalarType, "Temperature")
+    assert isinstance(temp.scaling, LUTScaling)
+    assert temp.scaling.units == "degC"
+    assert len(temp.scaling.ranges) == 2                     # <metaData> ignorado
+    assert temp.scaling.ranges[1].lsb == 0.25
+    assert temp.scaling.ranges[1].offset == 50.0
+
+    # enum definido inline dentro de un dataField > owns > scal > owns
+    status = nested.find_one(ScalarType, "STATUS")
+    assert isinstance(status.scaling, EnumScaling)
+    assert status.scaling.labels == {"0": "OFF", "1": "ON"}
+
+
 def test_text_type():
     _, main, _, _ = load_all()
     callsign = main.find_one(TextType, "CallSign")

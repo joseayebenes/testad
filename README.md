@@ -104,9 +104,9 @@ Edición estructural:
 Visores (`web/views.py`):
 
 * **Visor de mensaje** — muestra el mensaje completo aplanado en una tabla:
-  cada campo con su posición física, bits, tipo, codificación, escalado,
-  condición y origen (referencia local, entre archivos o inline). Desciende
-  por las subestructuras anidadas.
+  cada campo con `length (bit)`, `max_position`, tipo, codificación,
+  escalado, condición y un enlace a la entidad referenciada. Las
+  subestructuras anidadas se pueden **colapsar/expandir**.
 * **Visor de tipo** — muestra cómo se decodifica un tipo: propiedades
   (bits, codificación, contador de array, discriminador...) y el escalado
   detallado —fórmula lineal, tabla de estados (enum) o tramos (LUT)—.

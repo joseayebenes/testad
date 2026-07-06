@@ -58,6 +58,9 @@ class ICDApp:
         self._entity_by_node: Dict[str, Entity] = {}
         self._loaded: set[str] = set()
         self.selected: Optional[Entity] = None
+        # Estado de colapso del visor de mensaje (claves de fila colapsadas).
+        self._collapsed: set[str] = set()
+        self._collapsed_entity: Optional[Entity] = None
 
         # refs a componentes que se refrescan
         self.tree: Optional[ui.tree] = None
@@ -242,9 +245,18 @@ class ICDApp:
     def _root_nodes_keeping(self) -> list:
         return [self._make_shell(m) for m in self.session.modules]
 
+    _GRID_COLS = ("minmax(180px,2.2fr) 80px 110px minmax(140px,1.6fr) "
+                  "120px minmax(150px,1.8fr) 60px 56px")
+    _GRID_HEADERS = ("Campo", "length (bit)", "max_position", "Tipo",
+                     "Codificación", "Escalado", "Cond.", "Ref")
+
     def _message_viewer(self, message: Message) -> None:
-        """Visor de mensaje: el mensaje completo aplanado en una tabla."""
-        rows = [r.as_dict() for r in views.message_rows(message)]
+        """Visor de mensaje: el mensaje completo aplanado, colapsable, con enlaces."""
+        rows = views.message_rows(message)
+        # reiniciar el estado de colapso al cambiar de mensaje
+        if self._collapsed_entity is not message:
+            self._collapsed = set()
+            self._collapsed_entity = message
         with ui.card().classes("w-full"):
             with ui.row().classes("items-center w-full"):
                 ui.label("Visor de mensaje").classes("text-bold")
@@ -255,8 +267,74 @@ class ICDApp:
             if not rows:
                 ui.label("El mensaje no tiene payload resuelto.").classes("text-negative")
                 return
-            ui.table(columns=views.MESSAGE_COLUMNS, rows=rows, row_key="name") \
-                .classes("w-full").props("dense flat bordered wrap-cells")
+            self._render_field_grid(rows)
+
+    def _render_field_grid(self, rows) -> None:
+        by_key = {r.key: r for r in rows}
+        with ui.element("div").classes("w-full").style(
+                f"display:grid;grid-template-columns:{self._GRID_COLS};align-items:center;"):
+            for h in self._GRID_HEADERS:
+                ui.label(h).classes("text-xs text-bold").style(
+                    "padding:4px 6px;border-bottom:1px solid rgba(0,0,0,.25);")
+            for r in rows:
+                if self._row_hidden(r, by_key):
+                    continue
+                self._render_field_row(r)
+
+    def _row_hidden(self, r, by_key) -> bool:
+        p = r.parent_key
+        while p:
+            if p in self._collapsed:
+                return True
+            parent = by_key.get(p)
+            p = parent.parent_key if parent else ""
+        return False
+
+    def _cell(self, text: str, right: bool = False) -> None:
+        ui.label(text or "").classes("text-xs" + (" text-right" if right else "")).style(
+            "padding:3px 6px;border-bottom:1px solid rgba(0,0,0,.06);"
+            "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;")
+
+    def _render_field_row(self, r) -> None:
+        # celda del nombre: sangría por nivel + toggle si tiene hijos
+        with ui.row().classes("items-center no-wrap").style(
+                f"padding:1px 6px 1px {6 + r.level * 16}px;"
+                "border-bottom:1px solid rgba(0,0,0,.06);gap:2px;"):
+            if r.has_children:
+                collapsed = r.key in self._collapsed
+                ui.button(icon="chevron_right" if collapsed else "expand_more",
+                          on_click=lambda k=r.key: self._toggle_collapse(k)) \
+                    .props("flat dense round size=sm")
+            else:
+                ui.element("div").style("width:24px;")
+            ui.label(r.name or "—").classes("text-xs")
+        self._cell(r.length, right=True)
+        self._cell(r.position, right=True)
+        self._cell(r.type_name)
+        self._cell(r.coding)
+        self._cell(r.scaling)
+        self._cell(r.condition)
+        # celda de enlace a la referencia (si la hay y está resuelta)
+        if r.ref_id:
+            with ui.element("div").style("border-bottom:1px solid rgba(0,0,0,.06);text-align:center;"):
+                ui.button(icon="north_east", on_click=lambda i=r.ref_id: self._goto_id(i)) \
+                    .props("flat dense round size=sm").tooltip("ir a la referencia")
+        else:
+            ui.element("div").style("border-bottom:1px solid rgba(0,0,0,.06);")
+
+    def _toggle_collapse(self, key: str) -> None:
+        if key in self._collapsed:
+            self._collapsed.discard(key)
+        else:
+            self._collapsed.add(key)
+        self._render_detail()
+
+    def _goto_id(self, entity_id: str) -> None:
+        target = self.session.get(entity_id)
+        if target is not None:
+            self._goto(target)
+        else:
+            ui.notify("La referencia no está cargada", type="warning")
 
     def _type_viewer(self, typedef: TypeDef) -> None:
         """Visor de tipo: cómo se decodifica (propiedades + escalado + campos)."""

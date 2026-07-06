@@ -338,8 +338,27 @@ class ICDParser:
     # ------------------------------------------------------------------ #
     # Escalado
     # ------------------------------------------------------------------ #
-    def _parse_scaling(self, elem: ET.Element) -> Optional[Scaling]:
-        attrs = self._attrs(elem)
+    def _parse_scaling(self, scal_elem: ET.Element) -> Optional[Scaling]:
+        """Parsea el escalado de un elemento <scal>.
+
+        Dos formas admitidas:
+        * Real (EMF): <scal> sin tipo que envuelve <owns xsi:type="Scal:...">
+          (mismo patrón de contención inline que dataField > owns).
+        * Directa: <scal xsi:type="Scal:..."> con el tipo en el propio nodo.
+        """
+        attrs = self._attrs(scal_elem)
+        if "xsi:type" in attrs:
+            return self._parse_scaling_object(scal_elem, attrs)
+        for child in scal_elem:
+            if self._local(child.tag) == "owns":
+                child_attrs = self._attrs(child)
+                if "xsi:type" in child_attrs:
+                    return self._parse_scaling_object(child, child_attrs)
+            # <with href=...>: escalado compartido por referencia (no soportado aún)
+        logger.warning("Escalado sin tipo reconocible en <scal>")
+        return None
+
+    def _parse_scaling_object(self, elem: ET.Element, attrs: Dict[str, str]) -> Optional[Scaling]:
         kind = attrs.get("xsi:type", "").split(":")[-1]
         units = attrs.get("units", "")
 
@@ -349,23 +368,29 @@ class ICDParser:
                 lsb=_to_float(attrs.get("lsb")),
                 offset=_to_float(attrs.get("offset")),
             )
-        if kind == "Enums":
+        if kind in ("Enums", "Enum"):
             s = EnumScaling(units=units)
             for item in elem:
-                item_attrs = self._attrs(item)
-                value = item_attrs.get("value", "")
+                if self._local(item.tag) != "tag":
+                    continue  # ignora <metaData> y otros
+                ia = self._attrs(item)
+                value = ia.get("value", "")
                 if value != "":
-                    s.labels[value] = item_attrs.get("name", item_attrs.get("tag", ""))
+                    s.labels[value] = ia.get("name", "") or ia.get("alias", "")
             return s
-        if kind == "LUT":
+        if kind in ("LUT", "Lut"):
             s = LUTScaling(units=units)
             for item in elem:
-                item_attrs = self._attrs(item)
+                if self._local(item.tag) == "metaData":
+                    continue
+                ia = self._attrs(item)
+                if not any(k in ia for k in ("begin", "end", "lsb", "offset")):
+                    continue
                 s.ranges.append(LUTRange(
-                    begin=_to_float(item_attrs.get("begin")),
-                    end=_to_float(item_attrs.get("end")),
-                    lsb=_to_float(item_attrs.get("lsb")),
-                    offset=_to_float(item_attrs.get("offset")),
+                    begin=_to_float(ia.get("begin")),
+                    end=_to_float(ia.get("end")),
+                    lsb=_to_float(ia.get("lsb")),
+                    offset=_to_float(ia.get("offset")),
                 ))
             return s
 

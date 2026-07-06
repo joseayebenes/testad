@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module:Module xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:Module="http://www.ads.org/model/Module"
+    xmlns:Data="http://www.ads.org/icdms/Data"
+    xmlns:Scal="http://www.ads.org/icdms/Scal"
+    id="_mod_nested" name="Nested_ICD">
+
+  <folder id="_f_n" name="Blocks">
+    <!-- señal con escalado LUT (anidado en scal > owns), como el formato real -->
+    <data xsi:type="Data:Signal" id="_s_temp" name="Temperature" length="16" coding="twoComplement">
+      <scal id="_sc_temp" security="UNCLAS">
+        <owns xsi:type="Scal:LUT" id="_lut_temp" units="degC">
+          <metaData id="_md" alias="METADATA"/>
+          <stretch id="_r0" begin="0" end="100" lsb="0.5" offset="0"/>
+          <stretch id="_r1" begin="100" end="200" lsb="0.25" offset="50"/>
+        </owns>
+      </scal>
+    </data>
+
+    <!-- estructura interna reutilizable -->
+    <data xsi:type="Data:Structure" id="_st_inner" name="InnerBlock" length="16">
+      <dataField id="_if_temp" name="innerTemp" maxPosition="15" w16="0" w16_b="0" with="_s_temp"/>
+    </data>
+
+    <!-- estructura externa que anida la interna (para probar el colapso) -->
+    <data xsi:type="Data:Structure" id="_st_outer" name="OuterBlock" length="48">
+      <dataField id="_of_status" name="status" maxPosition="7" w16="0" w16_b="0">
+        <owns xsi:type="Data:Signal" id="_s_status" name="STATUS" length="8" defaultValue="NO_STATEMENT">
+          <scal id="_sc_status">
+            <owns xsi:type="Scal:Enums" id="_en_status">
+              <tag id="_es0" name="OFF" value="0"/>
+              <tag id="_es1" name="ON" value="1"/>
+            </owns>
+          </scal>
+        </owns>
+      </dataField>
+      <dataField id="_of_sub" name="subBlock" maxPosition="31" w16="1" w16_b="0" with="_st_inner"/>
+    </data>
+
+    <data xsi:type="Data:Message" id="_msg_outer" name="OuterMsg"
+          period="100" rateMode="periodic" with="_st_outer"/>
+  </folder>
+</Module:Module>

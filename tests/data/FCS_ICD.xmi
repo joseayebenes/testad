@@ -12,13 +12,17 @@
   <folder id="_f_signals" name="Signals" security="UNCLAS">
     <data xsi:type="Data:Signal" id="_sig_speed" name="AirSpeed"
           length="16" coding="twoComplement" security="UNCLAS" UniqueID="FCS-001">
-      <scal xsi:type="Scal:Lineal" lsb="0.0625" offset="0" units="kt"/>
+      <scal id="_sc_speed" security="UNCLAS">
+        <owns xsi:type="Scal:Lineal" id="_ln_speed" lsb="0.0625" offset="0" units="kt"/>
+      </scal>
     </data>
     <data xsi:type="Data:Signal" id="_sig_gear" name="GearStatus" length="2" coding="twoComplement">
-      <scal xsi:type="Scal:Enums">
-        <tag value="0" name="UP"/>
-        <tag value="1" name="DOWN"/>
-        <tag value="2" name="TRANSIT"/>
+      <scal id="_sc_gear">
+        <owns xsi:type="Scal:Enums" id="_en_gear" name="GEAR_STATES">
+          <tag id="_tg0" name="UP" value="0"/>
+          <tag id="_tg1" name="DOWN" value="1"/>
+          <tag id="_tg2" name="TRANSIT" value="2"/>
+        </owns>
       </scal>
     </data>
     <data xsi:type="Data:TextSignal" id="_sig_callsign" name="CallSign"
@@ -32,11 +36,11 @@
   <folder id="_f_messages" name="Messages">
     <folder id="_f_nav" name="Navigation">
       <data xsi:type="Data:Structure" id="_st_navblock" name="NavBlock" length="48">
-        <dataField id="_df_speed" name="speedField" w16="0" w16_b="0" with="_sig_speed"/>
-        <dataField id="_df_alt" name="altField" w16="1" w16_b="0">
+        <dataField id="_df_speed" name="speedField" maxPosition="15" w16="0" w16_b="0" with="_sig_speed"/>
+        <dataField id="_df_alt" name="altField" maxPosition="39" w16="1" w16_b="0">
           <with xsi:type="Data:Signal" href="BaseSignals.xmi#_sig_alt"/>
         </dataField>
-        <dataField id="_df_counter" name="counterField" w16="2" w16_b="0">
+        <dataField id="_df_counter" name="counterField" maxPosition="47" w16="2" w16_b="0">
           <owns xsi:type="Data:Signal" id="_own_counter" name="frameCounter"
                 length="8" coding="twoComplement"/>
         </dataField>

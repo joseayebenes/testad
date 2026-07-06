@@ -31,19 +31,22 @@ def test_message_rows_flattens_structure():
     assert [r.name for r in rows] == ["speedField", "altField", "counterField"]
     speed, alt, counter = rows
 
-    assert speed.position == "w16 0.0"
-    assert speed.bits == "16"
+    assert speed.position == "15"          # max_position
+    assert speed.length == "16"            # longitud en bits
     assert "AirSpeed" in speed.type_name
     assert speed.coding == "twoComplement"
     assert "× 0.0625" in speed.scaling and "kt" in speed.scaling
+    assert speed.ref_id == "_sig_speed"    # enlace a la señal referenciada
 
     # referencia entre archivos resuelta
     assert "Altitude" in alt.type_name
-    assert alt.bits == "24"
+    assert alt.length == "24"
+    assert alt.ref_id == "_sig_alt"
 
-    # tipo definido inline
+    # tipo definido inline (sin ref_id, va inline)
     assert "frameCounter" in counter.type_name
     assert counter.note == "inline"
+    assert counter.ref_id == ""
 
 
 def test_message_rows_recurses_into_nested_structures():
@@ -54,9 +57,12 @@ def test_message_rows_recurses_into_nested_structures():
     rows = flatten(header)
     # primera fila: el miembro de la variante; luego, sangrados, los 3 de NavBlock
     assert rows[0].level == 0
+    assert rows[0].has_children          # el miembro apunta a un compuesto
     sub = [r for r in rows if r.level == 1]
     assert {r.name for r in sub} == {"speedField", "altField", "counterField"}
     assert rows[0].condition == "1"
+    # las filas hijas cuelgan de la clave del padre
+    assert all(r.parent_key == rows[0].key for r in sub)
 
 
 # ---------------------------------------------------------------------- #

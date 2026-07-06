@@ -27,13 +27,17 @@ class Row:
     """Una fila del visor: un campo del mensaje/tipo, aplanado."""
     level: int = 0
     name: str = ""
-    position: str = ""
-    bits: str = ""
+    position: str = ""       # max_position (posición absoluta del bit)
+    length: str = ""         # longitud en bits
     type_name: str = ""
     coding: str = ""
     scaling: str = ""
     condition: str = ""
     note: str = ""
+    key: str = ""            # id único de la fila en el árbol aplanado
+    parent_key: str = ""     # fila padre (estructura que la contiene)
+    has_children: bool = False
+    ref_id: str = ""         # id de la entidad referenciada (para el enlace)
 
     def as_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -46,10 +50,8 @@ class Row:
 # Helpers de formato
 # ---------------------------------------------------------------------- #
 def _position(f: Field) -> str:
-    p = f.position
-    if p.word12 or p.bit12:
-        return f"w12 {p.word12}.{p.bit12}"
-    return f"w16 {p.word16}.{p.bit16}"
+    """Posición absoluta del campo: max_position del layout."""
+    return str(f.position.max_position)
 
 
 def _bits(dt: Optional[TypeDef]) -> str:
@@ -120,33 +122,46 @@ def _note(f: Field) -> str:
 # ---------------------------------------------------------------------- #
 # Aplanado
 # ---------------------------------------------------------------------- #
-def _field_row(f: Field, level: int) -> Row:
+def _field_row(f: Field, level: int, key: str, parent_key: str, has_children: bool) -> Row:
     dt = f.datatype
+    ref_id = f.ref.target.id if (f.ref is not None and f.ref.is_resolved and f.ref.target) else ""
     return Row(
         level=level,
         name=f.name,
         position=_position(f),
-        bits=_bits(dt),
+        length=_bits(dt),
         type_name=_type_name(f, dt),
         coding=getattr(dt, "encoding", "") or "",
         scaling=_scaling_summary(dt),
         condition=f.condition,
         note=_note(f),
+        key=key,
+        parent_key=parent_key,
+        has_children=has_children,
+        ref_id=ref_id,
     )
 
 
-def flatten(composite: CompositeType, level: int = 0, _seen: Optional[set] = None) -> List[Row]:
-    """Filas de un tipo compuesto, descendiendo por los campos compuestos."""
+def flatten(composite: CompositeType, level: int = 0, parent_key: str = "",
+            _seen: Optional[set] = None) -> List[Row]:
+    """Filas de un tipo compuesto, descendiendo por los campos compuestos.
+
+    Cada fila lleva una clave jerárquica única y la de su padre, para poder
+    colapsar/expandir subestructuras en el visor.
+    """
     _seen = _seen if _seen is not None else set()
     if id(composite) in _seen:
-        return [Row(level=level, name="… (recursivo)")]
+        return [Row(level=level, name="... (recursivo)", key=parent_key + ".rec",
+                    parent_key=parent_key)]
     _seen = _seen | {id(composite)}
     rows: List[Row] = []
-    for f in composite.fields:
-        rows.append(_field_row(f, level))
+    for i, f in enumerate(composite.fields):
+        key = f"{parent_key}.{i}" if parent_key else str(i)
         dt = f.datatype
-        if isinstance(dt, CompositeType):
-            rows.extend(flatten(dt, level + 1, _seen))
+        has_children = isinstance(dt, CompositeType) and id(dt) not in _seen
+        rows.append(_field_row(f, level, key, parent_key, has_children))
+        if has_children:
+            rows.extend(flatten(dt, level + 1, key, _seen))
     return rows
 
 
@@ -158,8 +173,8 @@ def message_rows(message: Message) -> List[Row]:
     if isinstance(st, CompositeType):
         return flatten(st)
     # payload escalar directo (raro): una única fila
-    return [Row(name=st.name, bits=_bits(st), type_name=type(st).__name__,
-                coding=getattr(st, "encoding", ""), scaling=_scaling_summary(st))]
+    return [Row(name=st.name, length=_bits(st), type_name=type(st).__name__,
+                coding=getattr(st, "encoding", ""), scaling=_scaling_summary(st), key="0")]
 
 
 # ---------------------------------------------------------------------- #
@@ -208,8 +223,8 @@ def type_view(t: TypeDef) -> Dict[str, Any]:
 
 MESSAGE_COLUMNS = [
     {"name": "name", "label": "Campo", "field": "name", "align": "left"},
-    {"name": "position", "label": "Posición", "field": "position", "align": "left"},
-    {"name": "bits", "label": "Bits", "field": "bits", "align": "right"},
+    {"name": "length", "label": "length (bit)", "field": "length", "align": "right"},
+    {"name": "position", "label": "max_position", "field": "position", "align": "right"},
     {"name": "type_name", "label": "Tipo", "field": "type_name", "align": "left"},
     {"name": "coding", "label": "Codificación", "field": "coding", "align": "left"},
     {"name": "scaling", "label": "Escalado", "field": "scaling", "align": "left"},
