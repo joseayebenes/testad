@@ -137,16 +137,27 @@ def main(argv: list[str] | None = None) -> int:
             print(module.pretty())
 
     if args.describe:
-        found = False
-        for module in registry.modules:
-            entity = module.find_one(name=args.describe)
-            if entity is not None:
-                found = True
+        needle = args.describe.lower()
+        # Coincidencia exacta primero; si no, por subcadena (nombres largos).
+        exact = [e for m in registry.modules for e in m.walk()
+                 if e.name.lower() == needle]
+        matches = exact or [e for m in registry.modules for e in m.walk()
+                            if needle in e.name.lower()]
+
+        if not matches:
+            print(f"\nNo se encontró ninguna entidad que contenga '{args.describe}'")
+        elif len(matches) > 1 and not exact:
+            print(f"\n{len(matches)} coincidencias para '{args.describe}' "
+                  "(afina el nombre o usa el exacto):")
+            for e in matches[:30]:
+                print(f"  {type(e).__name__:12} {e.path}")
+            if len(matches) > 30:
+                print(f"  ... y {len(matches) - 30} más")
+        else:
+            for e in matches:
                 print("\n" + "-" * 70)
-                describe = getattr(entity, "describe", None)
-                print(describe() if callable(describe) else repr(entity))
-        if not found:
-            print(f"\nNo se encontró ninguna entidad llamada '{args.describe}'")
+                describe = getattr(e, "describe", None)
+                print(describe() if callable(describe) else repr(e))
 
     print()
     return 0 if not parsed_errors else 1
