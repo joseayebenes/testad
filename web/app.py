@@ -625,6 +625,7 @@ class ICDApp:
         if isinstance(typedef, ScalarType):
             self._scaling_editor(typedef)
         if isinstance(typedef, CompositeType):
+            self._composite_grid(typedef)
             self._fields_editor(typedef)
 
     # ---- editor de escalado -------------------------------------------- #
@@ -730,6 +731,23 @@ class ICDApp:
 
     def _remove_lut(self, scalar, index):
         self.session.remove_lut_range(scalar, index); self._refresh_status(); self._render_detail()
+
+    def _composite_grid(self, comp: CompositeType) -> None:
+        """La misma tabla del visor de mensaje, para un tipo compuesto:
+        campos con length/max_position/codificación/escalado, subestructuras
+        colapsables y enlaces a las referencias."""
+        rows = views.flatten(comp)
+        if not rows:
+            return
+        with ui.card().classes("w-full"):
+            with ui.row().classes("items-center w-full"):
+                ui.label("Vista de campos").classes("text-bold")
+                ui.space()
+                ui.label(f"{len(rows)} filas").classes("text-sm text-grey")
+            if self._collapsed_entity is not comp:
+                self._collapsed = set()
+                self._collapsed_entity = comp
+            self._render_field_grid(rows)
 
     # ---- editor de campos de un compuesto ------------------------------ #
     def _fields_editor(self, comp: CompositeType) -> None:

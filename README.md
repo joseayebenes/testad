@@ -129,6 +129,10 @@ Visores (`web/views.py`):
 * **Visor de tipo** — muestra cómo se decodifica un tipo: propiedades
   (bits, codificación, contador de array, discriminador...) y el escalado
   detallado —fórmula lineal, tabla de estados (enum) o tramos (LUT)—.
+  Los tipos compuestos (registros, variantes, arrays) incluyen además la
+  misma **vista de campos** del visor de mensaje: tabla con length (bit),
+  max_position, codificación y escalado, subestructuras colapsables y
+  enlaces a referencias.
 * **Panel Codificar/Decodificar** — en mensajes, **estructuras, variantes
   y campos de tipo compuesto**; dos pestañas sincronizadas: **Tabla** (una
   fila por campo, rellenable; al decodificar se recuperan los valores en
