@@ -129,9 +129,12 @@ Visores (`web/views.py`):
 * **Visor de tipo** — muestra cómo se decodifica un tipo: propiedades
   (bits, codificación, contador de array, discriminador...) y el escalado
   detallado —fórmula lineal, tabla de estados (enum) o tramos (LUT)—.
-* **Panel Codificar/Decodificar** — en cada mensaje: formulario campo a
-  campo (o JSON para variantes/arrays), conmutador crudo/ingeniería, y
-  conversión en ambos sentidos campos ↔ bytes hex usando `core/codec.py`.
+* **Panel Codificar/Decodificar** — en cada mensaje, dos pestañas
+  sincronizadas: **Tabla** (una fila por campo, rellenable; al decodificar
+  se recuperan los valores en ella) y **JSON** (el mensaje completo como
+  texto). Conmutador crudo/ingeniería y conversión en ambos sentidos
+  campos ↔ bytes hex usando `core/codec.py`. Los campos array/variante
+  aparecen en la tabla como fila con valor JSON parcial.
 
 La lógica vive en `web/session.py` (`WorkSession`), que envuelve `core/`
 sin depender de NiceGUI, así que es testeable sin navegador.

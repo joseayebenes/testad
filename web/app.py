@@ -323,18 +323,6 @@ class ICDApp:
     # Panel de codificación/decodificación (usa core/codec.py)
     # ================================================================== #
     @staticmethod
-    def _is_formable(comp: CompositeType) -> bool:
-        """True si la estructura se puede editar con un formulario plano
-        (solo escalares/texto/registros anidados; sin variantes ni arrays)."""
-        for f in comp.fields:
-            dt = f.datatype
-            if dt is None or isinstance(dt, (ArrayType, VariantType)):
-                return False
-            if isinstance(dt, CompositeType) and not ICDApp._is_formable(dt):
-                return False
-        return True
-
-    @staticmethod
     def _parse_scalar_str(s: str) -> Any:
         """'0x1234' -> 4660, '10.5' -> 10.5, 'DOWN' -> 'DOWN'."""
         try:
@@ -357,33 +345,46 @@ class ICDApp:
                 ui.label("El mensaje no tiene payload resuelto.").classes("text-negative")
                 return
 
-            formable = self._is_formable(st)
-            inputs: Dict[str, Any] = {}
-            json_area = None
-            if formable:
-                self._build_codec_form(st, inputs, level=0)
-            else:
-                ui.label("La estructura tiene variantes o arrays: usa valores JSON "
-                         '(variantes: {"_case": "1", "value": {...}}).').classes("text-grey text-sm")
-                json_area = ui.textarea("valores (JSON)").props("outlined dense") \
-                    .classes("w-full").style("font-family:monospace;")
+            # Dos vistas de los mismos valores: tabla campo a campo y JSON.
+            with ui.tabs().props("dense") as tabs:
+                tab_table = ui.tab("Tabla")
+                tab_json = ui.tab("JSON")
+            rows: List[Dict[str, Any]] = []
+            with ui.tab_panels(tabs, value=tab_table).classes("w-full"):
+                with ui.tab_panel(tab_table).classes("p-0"):
+                    self._build_codec_rows(st, rows, prefix="", level=0)
+                with ui.tab_panel(tab_json).classes("p-0"):
+                    json_area = ui.textarea("valores (JSON)").props("outlined dense") \
+                        .classes("w-full").style("font-family:monospace;min-height:120px;")
 
             hex_in = ui.input("bytes (hex)").props("outlined dense") \
                 .classes("w-full").style("font-family:monospace;")
             result_box = ui.column().classes("w-full")
 
             def gather() -> Dict[str, Any]:
-                if json_area is not None:
+                # tabs.value es el objeto tab al crear, o su nombre tras un clic
+                if tabs.value in (tab_json, "JSON"):
                     return json.loads(json_area.value or "{}")
-                return self._gather_form(inputs)
+                return self._gather_rows(rows)
+
+            def show(values: Dict[str, Any]) -> None:
+                """Refleja los valores en la tabla, el JSON y el resultado."""
+                self._fill_rows(rows, values)
+                json_area.set_value(json.dumps(values, indent=2, ensure_ascii=False))
+                result_box.clear()
+                with result_box:
+                    ui.code(json.dumps(values, indent=2, ensure_ascii=False)).classes("w-full")
 
             def do_encode() -> None:
                 try:
-                    data = codec.encode_message(message, gather(), engineering=eng.value)
+                    values = gather()
+                    data = codec.encode_message(message, values, engineering=eng.value)
                 except (codec.CodecError, ValueError, json.JSONDecodeError) as exc:
                     ui.notify(f"Error al codificar: {exc}", type="negative")
                     return
                 hex_in.set_value(data.hex(" ").upper())
+                # sincronizar la otra vista con lo codificado
+                json_area.set_value(json.dumps(values, indent=2, ensure_ascii=False))
                 ui.notify(f"{len(data)} bytes", type="positive")
 
             def do_decode() -> None:
@@ -394,14 +395,7 @@ class ICDApp:
                 except (codec.CodecError, ValueError) as exc:
                     ui.notify(f"Error al decodificar: {exc}", type="negative")
                     return
-                if json_area is not None:
-                    json_area.set_value(json.dumps(values, indent=2, ensure_ascii=False))
-                else:
-                    self._fill_form(inputs, values)
-                result_box.clear()
-                with result_box:
-                    ui.code(json.dumps(values, indent=2, ensure_ascii=False)) \
-                        .classes("w-full")
+                show(values)
 
             with ui.row().classes("gap-2"):
                 ui.button("Codificar →", icon="arrow_downward", on_click=do_encode) \
@@ -409,44 +403,65 @@ class ICDApp:
                 ui.button("← Decodificar", icon="arrow_upward", on_click=do_decode) \
                     .props("dense outline")
 
-    def _build_codec_form(self, comp: CompositeType, inputs: Dict[str, Any],
-                          level: int) -> None:
-        pad = level * 16
+    # -- tabla de campos: una fila por campo hoja -------------------------- #
+    def _build_codec_rows(self, comp: CompositeType, rows: List[Dict[str, Any]],
+                          prefix: str, level: int) -> None:
+        """Construye las filas de la tabla. Los registros anidados se
+        despliegan; los arrays/variantes son una fila con valor JSON parcial."""
         for f in comp.fields:
             dt = f.datatype
             name = f.name or "(campo)"
-            if isinstance(dt, CompositeType):
-                ui.label(name).classes("text-bold text-sm") \
-                    .style(f"margin-left:{pad}px;")
-                sub: Dict[str, Any] = {}
-                inputs[f.name] = sub
-                self._build_codec_form(dt, sub, level + 1)
+            path = f"{prefix}.{f.name}" if prefix else f.name
+            pad = level * 16
+            if isinstance(dt, (ArrayType, VariantType)) or dt is None:
+                hint = ('[{...}, ...]' if isinstance(dt, ArrayType)
+                        else '{"_case": "1", "value": {...}}' if isinstance(dt, VariantType)
+                        else "sin resolver")
+                with ui.row().classes("items-center w-full no-wrap gap-2") \
+                        .style(f"padding-left:{pad}px;"):
+                    ui.label(name).classes("text-sm").style("width:180px;")
+                    inp = ui.input(placeholder=f"JSON: {hint}").props("dense outlined") \
+                        .classes("w-full").style("font-family:monospace;max-width:460px;")
+                rows.append({"path": path, "input": inp, "kind": "json"})
+            elif isinstance(dt, CompositeType):
+                ui.label(name).classes("text-bold text-sm").style(f"margin-left:{pad}px;")
+                self._build_codec_rows(dt, rows, path, level + 1)
             else:
-                hint = dt.summary() if dt is not None else ""
-                inp = ui.input(name, placeholder=hint).props("dense outlined") \
-                    .classes("w-full").style(f"margin-left:{pad}px;max-width:420px;")
-                inputs[f.name] = inp
+                hint = dt.summary()
+                with ui.row().classes("items-center w-full no-wrap gap-2") \
+                        .style(f"padding-left:{pad}px;"):
+                    inp = ui.input(name, placeholder=hint).props("dense outlined") \
+                        .classes("w-full").style("max-width:460px;")
+                rows.append({"path": path, "input": inp, "kind": "scalar"})
 
-    def _gather_form(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def _gather_rows(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
-        for key, comp in inputs.items():
-            if isinstance(comp, dict):
-                sub = self._gather_form(comp)
-                if sub:
-                    out[key] = sub
-            else:
-                s = str(comp.value or "").strip()
-                if s != "":
-                    out[key] = self._parse_scalar_str(s)
+        for row in rows:
+            s = str(row["input"].value or "").strip()
+            if s == "":
+                continue
+            value = json.loads(s) if row["kind"] == "json" else self._parse_scalar_str(s)
+            node = out
+            parts = row["path"].split(".")
+            for part in parts[:-1]:
+                node = node.setdefault(part, {})
+            node[parts[-1]] = value
         return out
 
-    def _fill_form(self, inputs: Dict[str, Any], values: Dict[str, Any]) -> None:
-        for key, comp in inputs.items():
-            if isinstance(comp, dict):
-                self._fill_form(comp, values.get(key) or {})
+    def _fill_rows(self, rows: List[Dict[str, Any]], values: Dict[str, Any]) -> None:
+        for row in rows:
+            node: Any = values
+            for part in row["path"].split("."):
+                if not isinstance(node, dict) or part not in node:
+                    node = None
+                    break
+                node = node[part]
+            if node is None:
+                row["input"].set_value("")
+            elif row["kind"] == "json":
+                row["input"].set_value(json.dumps(node, ensure_ascii=False))
             else:
-                value = values.get(key, "")
-                comp.set_value(str(value))
+                row["input"].set_value(str(node))
 
     def _render_field_grid(self, rows) -> None:
         by_key = {r.key: r for r in rows}
