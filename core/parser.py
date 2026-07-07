@@ -54,6 +54,7 @@ TYPE_MAP = {
     "Signal": ScalarType,
     "TextSignal": TextType,
     "Structure": RecordType,
+    "Struct": RecordType,
     "VariableArray": ArrayType,
     "Header": VariantType,
     "Message": Message,
