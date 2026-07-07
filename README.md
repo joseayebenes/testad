@@ -28,6 +28,7 @@ core/
   registry.py    Índice global por id + resolución de referencias entre archivos
   validation.py  Validador: campos obligatorios, solapamientos, refs rotas...
   persistence.py Guardar/cargar el modelo en JSON (formato propio)
+  codec.py       Codec de referencia: encode/decode de mensajes desde el modelo
 tests/
   data/          XMIs de ejemplo fieles al formato de producción
   test_parser.py
@@ -181,6 +182,26 @@ print(summarize(issues))
 ```bash
 python3 tests/test_parser.py      # o: python -m pytest tests/
 ```
+
+### Codec de referencia
+
+`core/codec.py` empaqueta/desempaqueta mensajes interpretando el modelo
+directamente (sin código generado). Sirve como oráculo del futuro código
+autogenerado y para el panel interactivo de la web.
+
+```python
+from core.codec import encode_message, decode_message
+
+data = encode_message(msg, {"speedField": 10.0, "altField": 1000}, engineering=True)
+# b'\\x00\\xa0\\x00\\x03\\xe8\\x00'  (10 kt -> raw 160 con lsb 0.0625)
+decode_message(msg, data, engineering=True)   # {'speedField': 10.0, ...}
+```
+
+Soporta: registros anidados, variantes (con `_case`), arrays variables con
+contador, escalado lineal/enum/LUT, twoComplement/IEEE754/BCD/ASCII, valores
+por defecto y errores explícitos (`CodecError`). La convención de bits está
+documentada en la cabecera del módulo y **pendiente de confirmar contra un
+mensaje real** (campo en `[max_position-length+1 .. max_position]`, MSB-first).
 
 ### Persistencia JSON
 
