@@ -224,6 +224,11 @@ class ICDApp:
                 self._codec_panel(entity)
             elif isinstance(entity, TypeDef):
                 self._type_viewer(entity)
+                if isinstance(entity, (RecordType, VariantType)):
+                    self._codec_panel(entity)
+            elif isinstance(entity, Field) and isinstance(entity.datatype, CompositeType) \
+                    and not isinstance(entity.datatype, ArrayType):
+                self._codec_panel(entity)
             elif callable(getattr(entity, "describe", None)):
                 with ui.card().classes("w-full"):
                     ui.label("Layout").classes("text-bold")
@@ -334,15 +339,35 @@ class ICDApp:
         except ValueError:
             return s
 
-    def _codec_panel(self, message: Message) -> None:
-        st = message.structure
+    @staticmethod
+    def _codec_target(entity: Entity) -> Optional[CompositeType]:
+        """El tipo compuesto sobre el que opera el panel, según la entidad."""
+        if isinstance(entity, Message):
+            st = entity.structure
+            return st if isinstance(st, CompositeType) else None
+        if isinstance(entity, Field):
+            dt = entity.datatype
+            return dt if isinstance(dt, CompositeType) else None
+        if isinstance(entity, CompositeType):
+            return entity
+        return None
+
+    def _codec_panel(self, entity: Entity) -> None:
+        comp = self._codec_target(entity)
         with ui.card().classes("w-full"):
             with ui.row().classes("items-center w-full"):
                 ui.label("Codificar / Decodificar").classes("text-bold")
+                if comp is not None and comp is not entity:
+                    ui.label(f"({type(comp).__name__} '{comp.name}')") \
+                        .classes("text-sm text-grey")
                 ui.space()
                 eng = ui.switch("unidades de ingeniería", value=True).props("dense")
-            if st is None or not isinstance(st, CompositeType):
-                ui.label("El mensaje no tiene payload resuelto.").classes("text-negative")
+            if comp is None:
+                ui.label("Sin estructura resuelta que codificar.").classes("text-negative")
+                return
+            if isinstance(comp, ArrayType):
+                ui.label("Array variable: codifícalo a través de la estructura "
+                         "que lo contiene.").classes("text-grey")
                 return
 
             # Dos vistas de los mismos valores: tabla campo a campo y JSON.
@@ -352,7 +377,7 @@ class ICDApp:
             rows: List[Dict[str, Any]] = []
             with ui.tab_panels(tabs, value=tab_table).classes("w-full"):
                 with ui.tab_panel(tab_table).classes("p-0"):
-                    self._build_codec_rows(st, rows, prefix="", level=0)
+                    self._build_root_rows(comp, rows)
                 with ui.tab_panel(tab_json).classes("p-0"):
                     json_area = ui.textarea("valores (JSON)").props("outlined dense") \
                         .classes("w-full").style("font-family:monospace;min-height:120px;")
@@ -378,7 +403,7 @@ class ICDApp:
             def do_encode() -> None:
                 try:
                     values = gather()
-                    data = codec.encode_message(message, values, engineering=eng.value)
+                    data = codec.encode_type(comp, values, engineering=eng.value)
                 except (codec.CodecError, ValueError, json.JSONDecodeError) as exc:
                     ui.notify(f"Error al codificar: {exc}", type="negative")
                     return
@@ -389,9 +414,17 @@ class ICDApp:
 
             def do_decode() -> None:
                 raw = (hex_in.value or "").replace(" ", "").replace("\n", "")
+                # el caso de una variante raíz se toma de la fila/JSON '_case'
+                case = None
+                try:
+                    case = gather().get("_case")
+                except (ValueError, json.JSONDecodeError):
+                    pass
                 try:
                     data = bytes.fromhex(raw)
-                    values = codec.decode_message(message, data, engineering=eng.value)
+                    values = codec.decode_type(
+                        comp, data, engineering=eng.value,
+                        case=str(case) if case is not None else None)
                 except (codec.CodecError, ValueError) as exc:
                     ui.notify(f"Error al decodificar: {exc}", type="negative")
                     return
@@ -403,36 +436,63 @@ class ICDApp:
                 ui.button("← Decodificar", icon="arrow_upward", on_click=do_decode) \
                     .props("dense outline")
 
+    def _build_root_rows(self, comp: CompositeType, rows: List[Dict[str, Any]]) -> None:
+        """Filas de la tabla para el compuesto raíz del panel.
+
+        Para una variante raíz: campos comunes + fila '_case' (selector del
+        caso) + fila 'value' (contenido del caso, JSON parcial)."""
+        if isinstance(comp, VariantType):
+            common = [f for f in comp.fields if not f.is_conditional]
+            for f in common:
+                self._codec_field_row(f, rows, prefix="", level=0)
+            cases = ", ".join(f.condition for f in comp.cases) or "—"
+            with ui.row().classes("items-center w-full no-wrap gap-2"):
+                case_in = ui.input("_case", placeholder=f"casos: {cases}") \
+                    .props("dense outlined").classes("w-full").style("max-width:460px;")
+            rows.append({"path": "_case", "input": case_in, "kind": "scalar"})
+            with ui.row().classes("items-center w-full no-wrap gap-2"):
+                ui.label("value").classes("text-sm").style("width:180px;")
+                val_in = ui.input(placeholder='JSON del caso: {"campo": ...}') \
+                    .props("dense outlined").classes("w-full") \
+                    .style("font-family:monospace;max-width:460px;")
+            rows.append({"path": "value", "input": val_in, "kind": "json"})
+            return
+        self._build_codec_rows(comp, rows, prefix="", level=0)
+
     # -- tabla de campos: una fila por campo hoja -------------------------- #
     def _build_codec_rows(self, comp: CompositeType, rows: List[Dict[str, Any]],
                           prefix: str, level: int) -> None:
         """Construye las filas de la tabla. Los registros anidados se
         despliegan; los arrays/variantes son una fila con valor JSON parcial."""
         for f in comp.fields:
-            dt = f.datatype
-            name = f.name or "(campo)"
-            path = f"{prefix}.{f.name}" if prefix else f.name
-            pad = level * 16
-            if isinstance(dt, (ArrayType, VariantType)) or dt is None:
-                hint = ('[{...}, ...]' if isinstance(dt, ArrayType)
-                        else '{"_case": "1", "value": {...}}' if isinstance(dt, VariantType)
-                        else "sin resolver")
-                with ui.row().classes("items-center w-full no-wrap gap-2") \
-                        .style(f"padding-left:{pad}px;"):
-                    ui.label(name).classes("text-sm").style("width:180px;")
-                    inp = ui.input(placeholder=f"JSON: {hint}").props("dense outlined") \
-                        .classes("w-full").style("font-family:monospace;max-width:460px;")
-                rows.append({"path": path, "input": inp, "kind": "json"})
-            elif isinstance(dt, CompositeType):
-                ui.label(name).classes("text-bold text-sm").style(f"margin-left:{pad}px;")
-                self._build_codec_rows(dt, rows, path, level + 1)
-            else:
-                hint = dt.summary()
-                with ui.row().classes("items-center w-full no-wrap gap-2") \
-                        .style(f"padding-left:{pad}px;"):
-                    inp = ui.input(name, placeholder=hint).props("dense outlined") \
-                        .classes("w-full").style("max-width:460px;")
-                rows.append({"path": path, "input": inp, "kind": "scalar"})
+            self._codec_field_row(f, rows, prefix, level)
+
+    def _codec_field_row(self, f: Field, rows: List[Dict[str, Any]],
+                         prefix: str, level: int) -> None:
+        dt = f.datatype
+        name = f.name or "(campo)"
+        path = f"{prefix}.{f.name}" if prefix else f.name
+        pad = level * 16
+        if isinstance(dt, (ArrayType, VariantType)) or dt is None:
+            hint = ('[{...}, ...]' if isinstance(dt, ArrayType)
+                    else '{"_case": "1", "value": {...}}' if isinstance(dt, VariantType)
+                    else "sin resolver")
+            with ui.row().classes("items-center w-full no-wrap gap-2") \
+                    .style(f"padding-left:{pad}px;"):
+                ui.label(name).classes("text-sm").style("width:180px;")
+                inp = ui.input(placeholder=f"JSON: {hint}").props("dense outlined") \
+                    .classes("w-full").style("font-family:monospace;max-width:460px;")
+            rows.append({"path": path, "input": inp, "kind": "json"})
+        elif isinstance(dt, CompositeType):
+            ui.label(name).classes("text-bold text-sm").style(f"margin-left:{pad}px;")
+            self._build_codec_rows(dt, rows, path, level + 1)
+        else:
+            hint = dt.summary()
+            with ui.row().classes("items-center w-full no-wrap gap-2") \
+                    .style(f"padding-left:{pad}px;"):
+                inp = ui.input(name, placeholder=hint).props("dense outlined") \
+                    .classes("w-full").style("max-width:460px;")
+            rows.append({"path": path, "input": inp, "kind": "scalar"})
 
     def _gather_rows(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
