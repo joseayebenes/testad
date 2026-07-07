@@ -20,13 +20,16 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-from typing import Dict, List, Optional
+import json
+from typing import Any, Dict, List, Optional
 
 from nicegui import ui
 
+from core import codec
 from core.model import (
-    Bus, CompositeType, Entity, Field, Message, MessageSlot, Module,
-    Network, Port, Reference, ScalarType, TypeDef,
+    ArrayType, Bus, CompositeType, Entity, Field, Message, MessageSlot,
+    Module, Network, Port, RecordType, Reference, ScalarType, TextType,
+    TypeDef, VariantType,
 )
 from web.session import WorkSession
 from web import views
@@ -179,6 +182,7 @@ class ICDApp:
             # --- visor específico según el tipo de entidad ---
             if isinstance(entity, Message):
                 self._message_viewer(entity)
+                self._codec_panel(entity)
             elif isinstance(entity, TypeDef):
                 self._type_viewer(entity)
             elif callable(getattr(entity, "describe", None)):
@@ -275,6 +279,135 @@ class ICDApp:
                 ui.label("El mensaje no tiene payload resuelto.").classes("text-negative")
                 return
             self._render_field_grid(rows)
+
+    # ================================================================== #
+    # Panel de codificación/decodificación (usa core/codec.py)
+    # ================================================================== #
+    @staticmethod
+    def _is_formable(comp: CompositeType) -> bool:
+        """True si la estructura se puede editar con un formulario plano
+        (solo escalares/texto/registros anidados; sin variantes ni arrays)."""
+        for f in comp.fields:
+            dt = f.datatype
+            if dt is None or isinstance(dt, (ArrayType, VariantType)):
+                return False
+            if isinstance(dt, CompositeType) and not ICDApp._is_formable(dt):
+                return False
+        return True
+
+    @staticmethod
+    def _parse_scalar_str(s: str) -> Any:
+        """'0x1234' -> 4660, '10.5' -> 10.5, 'DOWN' -> 'DOWN'."""
+        try:
+            return int(s, 0)
+        except ValueError:
+            pass
+        try:
+            return float(s)
+        except ValueError:
+            return s
+
+    def _codec_panel(self, message: Message) -> None:
+        st = message.structure
+        with ui.card().classes("w-full"):
+            with ui.row().classes("items-center w-full"):
+                ui.label("Codificar / Decodificar").classes("text-bold")
+                ui.space()
+                eng = ui.switch("unidades de ingeniería", value=True).props("dense")
+            if st is None or not isinstance(st, CompositeType):
+                ui.label("El mensaje no tiene payload resuelto.").classes("text-negative")
+                return
+
+            formable = self._is_formable(st)
+            inputs: Dict[str, Any] = {}
+            json_area = None
+            if formable:
+                self._build_codec_form(st, inputs, level=0)
+            else:
+                ui.label("La estructura tiene variantes o arrays: usa valores JSON "
+                         '(variantes: {"_case": "1", "value": {...}}).').classes("text-grey text-sm")
+                json_area = ui.textarea("valores (JSON)").props("outlined dense") \
+                    .classes("w-full").style("font-family:monospace;")
+
+            hex_in = ui.input("bytes (hex)").props("outlined dense") \
+                .classes("w-full").style("font-family:monospace;")
+            result_box = ui.column().classes("w-full")
+
+            def gather() -> Dict[str, Any]:
+                if json_area is not None:
+                    return json.loads(json_area.value or "{}")
+                return self._gather_form(inputs)
+
+            def do_encode() -> None:
+                try:
+                    data = codec.encode_message(message, gather(), engineering=eng.value)
+                except (codec.CodecError, ValueError, json.JSONDecodeError) as exc:
+                    ui.notify(f"Error al codificar: {exc}", type="negative")
+                    return
+                hex_in.set_value(data.hex(" ").upper())
+                ui.notify(f"{len(data)} bytes", type="positive")
+
+            def do_decode() -> None:
+                raw = (hex_in.value or "").replace(" ", "").replace("\n", "")
+                try:
+                    data = bytes.fromhex(raw)
+                    values = codec.decode_message(message, data, engineering=eng.value)
+                except (codec.CodecError, ValueError) as exc:
+                    ui.notify(f"Error al decodificar: {exc}", type="negative")
+                    return
+                if json_area is not None:
+                    json_area.set_value(json.dumps(values, indent=2, ensure_ascii=False))
+                else:
+                    self._fill_form(inputs, values)
+                result_box.clear()
+                with result_box:
+                    ui.code(json.dumps(values, indent=2, ensure_ascii=False)) \
+                        .classes("w-full")
+
+            with ui.row().classes("gap-2"):
+                ui.button("Codificar →", icon="arrow_downward", on_click=do_encode) \
+                    .props("dense")
+                ui.button("← Decodificar", icon="arrow_upward", on_click=do_decode) \
+                    .props("dense outline")
+
+    def _build_codec_form(self, comp: CompositeType, inputs: Dict[str, Any],
+                          level: int) -> None:
+        pad = level * 16
+        for f in comp.fields:
+            dt = f.datatype
+            name = f.name or "(campo)"
+            if isinstance(dt, CompositeType):
+                ui.label(name).classes("text-bold text-sm") \
+                    .style(f"margin-left:{pad}px;")
+                sub: Dict[str, Any] = {}
+                inputs[f.name] = sub
+                self._build_codec_form(dt, sub, level + 1)
+            else:
+                hint = dt.summary() if dt is not None else ""
+                inp = ui.input(name, placeholder=hint).props("dense outlined") \
+                    .classes("w-full").style(f"margin-left:{pad}px;max-width:420px;")
+                inputs[f.name] = inp
+
+    def _gather_form(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for key, comp in inputs.items():
+            if isinstance(comp, dict):
+                sub = self._gather_form(comp)
+                if sub:
+                    out[key] = sub
+            else:
+                s = str(comp.value or "").strip()
+                if s != "":
+                    out[key] = self._parse_scalar_str(s)
+        return out
+
+    def _fill_form(self, inputs: Dict[str, Any], values: Dict[str, Any]) -> None:
+        for key, comp in inputs.items():
+            if isinstance(comp, dict):
+                self._fill_form(comp, values.get(key) or {})
+            else:
+                value = values.get(key, "")
+                comp.set_value(str(value))
 
     def _render_field_grid(self, rows) -> None:
         by_key = {r.key: r for r in rows}

@@ -129,6 +129,9 @@ Visores (`web/views.py`):
 * **Visor de tipo** — muestra cómo se decodifica un tipo: propiedades
   (bits, codificación, contador de array, discriminador...) y el escalado
   detallado —fórmula lineal, tabla de estados (enum) o tramos (LUT)—.
+* **Panel Codificar/Decodificar** — en cada mensaje: formulario campo a
+  campo (o JSON para variantes/arrays), conmutador crudo/ingeniería, y
+  conversión en ambos sentidos campos ↔ bytes hex usando `core/codec.py`.
 
 La lógica vive en `web/session.py` (`WorkSession`), que envuelve `core/`
 sin depender de NiceGUI, así que es testeable sin navegador.
