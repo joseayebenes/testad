@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import urllib.parse
 from typing import Any, Dict, List, Optional
 
 from nicegui import ui
@@ -64,6 +65,10 @@ class ICDApp:
         # Estado de colapso del visor de mensaje (claves de fila colapsadas).
         self._collapsed: set[str] = set()
         self._collapsed_entity: Optional[Entity] = None
+        # Historial del navegador: True mientras restauramos desde atrás/adelante
+        # (para no re-empujar estados) y último hash empujado (evitar duplicados).
+        self._restoring_history = False
+        self._last_hash = ""
 
         # refs a componentes que se refrescan
         self.tree: Optional[ui.tree] = None
@@ -119,10 +124,44 @@ class ICDApp:
         for node_id in event.value:
             self._populate(node_id)
 
+    # ================================================================== #
+    # Historial del navegador (botón atrás/adelante)
+    # ================================================================== #
+    def _push_history(self, entity: Optional[Entity]) -> None:
+        """Empuja la selección al historial (#<id>) para que 'atrás' funcione."""
+        if self._restoring_history:
+            return
+        tag = urllib.parse.quote(self._node_id(entity), safe="") if entity else ""
+        if tag == self._last_hash:
+            return
+        self._last_hash = tag
+        if tag:
+            ui.run_javascript(f'history.pushState(null, "", "#" + {json.dumps(tag)});')
+        else:
+            ui.run_javascript('history.pushState(null, "", window.location.pathname);')
+
+    def _handle_history(self, event) -> None:
+        """popstate (atrás/adelante) o carga con hash: restaurar la selección."""
+        hash_ = ((event.args or {}).get("hash") or "").lstrip("#")
+        node_id = urllib.parse.unquote(hash_)
+        self._restoring_history = True
+        try:
+            self._last_hash = urllib.parse.quote(node_id, safe="") if node_id else ""
+            if not node_id:
+                self.selected = None
+                self._render_detail()
+                return
+            entity = self.session.get(node_id) or self.session.find_by_path(node_id)
+            if entity is not None:
+                self._goto(entity)
+        finally:
+            self._restoring_history = False
+
     def _on_select(self, event) -> None:
         node_id = event.value
         entity = self._entity_by_node.get(node_id) if node_id else None
         self.selected = entity
+        self._push_history(entity)
         # Seleccionar un nodo con hijos también lo expande (UX de navegador).
         if entity is not None and entity.children:
             self._populate(node_id)
@@ -724,6 +763,7 @@ class ICDApp:
 
     def _goto(self, entity: Entity) -> None:
         self.selected = entity
+        self._push_history(entity)
         node_id = self._node_id(entity)
         # asegurar que la rama está expandida hasta la entidad
         chain = []
@@ -814,6 +854,20 @@ class ICDApp:
     # Montaje de la página
     # ================================================================== #
     def build(self) -> None:
+        # El botón atrás/adelante del navegador restaura la selección, y una
+        # URL con #<id> restaura la entidad al (re)cargar la página.
+        ui.add_body_html("""<script>
+            window.addEventListener('popstate', () => {
+                emitEvent('icd_nav', {hash: window.location.hash});
+            });
+            window.addEventListener('load', () => {
+                if (window.location.hash) {
+                    emitEvent('icd_nav', {hash: window.location.hash});
+                }
+            });
+        </script>""")
+        ui.on("icd_nav", self._handle_history)
+
         with ui.header().classes("items-center gap-2"):
             ui.label("ICDMS").classes("text-h6")
             # --- proyecto JSON: abrir y guardar (modo de trabajo normal) ---
