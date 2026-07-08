@@ -1,0 +1,125 @@
+# ==========================================================================
+# CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+# Runtime L0: E/S de bits y codificaciones. Sin dependencias externas.
+# ==========================================================================
+"""Runtime de bit I/O del código generado (capa L0).
+
+Convención (la del ICD): la numeración de bits del mensaje empieza en 1;
+internamente los índices son 0-based y el bit más significativo de cada
+byte va primero (MSB-first).
+"""
+
+from __future__ import annotations
+
+import struct
+
+
+class EncodeError(Exception):
+    pass
+
+
+class DecodeError(Exception):
+    pass
+
+
+class BitBuffer:
+    def __init__(self, nbits: int) -> None:
+        self.nbits = nbits
+        self.data = bytearray((nbits + 7) // 8)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "BitBuffer":
+        buf = cls(len(data) * 8)
+        buf.data = bytearray(data)
+        return buf
+
+    def to_bytes(self) -> bytes:
+        return bytes(self.data)
+
+    def set_bits(self, start: int, length: int, value: int) -> None:
+        if start < 0 or start + length > self.nbits:
+            raise EncodeError(f"rango de bits fuera del mensaje: [{start}, {start + length})")
+        for i in range(length):
+            bit = (value >> (length - 1 - i)) & 1
+            pos = start + i
+            if bit:
+                self.data[pos >> 3] |= 1 << (7 - (pos & 7))
+            else:
+                self.data[pos >> 3] &= ~(1 << (7 - (pos & 7))) & 0xFF
+
+    def get_bits(self, start: int, length: int) -> int:
+        if start < 0 or start + length > len(self.data) * 8:
+            raise DecodeError(f"rango de bits fuera de los datos: [{start}, {start + length})")
+        value = 0
+        for i in range(length):
+            pos = start + i
+            value = (value << 1) | ((self.data[pos >> 3] >> (7 - (pos & 7))) & 1)
+        return value
+
+
+# -- enteros ------------------------------------------------------------- #
+def enc_twoc(value: int, bits: int) -> int:
+    lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+    if not lo <= value <= hi:
+        raise EncodeError(f"{value} fuera de rango [{lo}, {hi}] ({bits} bits c2)")
+    return value & ((1 << bits) - 1)
+
+
+def dec_twoc(raw: int, bits: int) -> int:
+    return raw - (1 << bits) if raw >= (1 << (bits - 1)) else raw
+
+
+def enc_uint(value: int, bits: int) -> int:
+    if not 0 <= value < (1 << bits):
+        raise EncodeError(f"{value} fuera de rango [0, {(1 << bits) - 1}] ({bits} bits)")
+    return value
+
+
+def dec_uint(raw: int, bits: int) -> int:
+    return raw
+
+
+# -- IEEE754 ------------------------------------------------------------- #
+def enc_f32(value: float) -> int:
+    return int.from_bytes(struct.pack(">f", float(value)), "big")
+
+
+def dec_f32(raw: int) -> float:
+    return struct.unpack(">f", raw.to_bytes(4, "big"))[0]
+
+
+def enc_f64(value: float) -> int:
+    return int.from_bytes(struct.pack(">d", float(value)), "big")
+
+
+def dec_f64(raw: int) -> float:
+    return struct.unpack(">d", raw.to_bytes(8, "big"))[0]
+
+
+# -- BCD ----------------------------------------------------------------- #
+def enc_bcd(value: int, bits: int) -> int:
+    digits = str(int(value))
+    if len(digits) * 4 > bits:
+        raise EncodeError(f"{value} no cabe en BCD de {bits} bits")
+    out = 0
+    for d in digits:
+        out = (out << 4) | int(d)
+    return out
+
+
+def dec_bcd(raw: int, bits: int) -> int:
+    digits = []
+    for shift in range(bits - 4, -1, -4):
+        digits.append((raw >> shift) & 0xF)
+    return int("".join(str(d) for d in digits))
+
+
+# -- texto ASCII ----------------------------------------------------------- #
+def enc_ascii(text: str, chars: int) -> int:
+    if len(text) > chars:
+        raise EncodeError(f"'{text}' excede {chars} caracteres")
+    return int.from_bytes(text.ljust(chars, " ").encode("ascii"), "big")
+
+
+def dec_ascii(raw: int, chars: int) -> str:
+    return raw.to_bytes(chars, "big").decode("ascii", errors="replace").rstrip(" \x00")

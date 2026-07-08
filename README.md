@@ -235,10 +235,29 @@ registry.resolve_references()                  # re-enlaza las referencias
 Flujo típico: cargar XML → editar en memoria → `save_module` (JSON) →
 `load_module` para recuperar el trabajo sin volver a tocar el XML.
 
+## Generación de código
+
+Generador Jinja2 sobre el modelo (`core/codegen/`, spec en
+[`docs/codegen_spec.md`](docs/codegen_spec.md)). Backend Python operativo:
+
+```bash
+python3 -m core.codegen project_json --out gen/     # o carpeta XML
+```
+
+Genera por cada módulo ICD un paquete por capas (norma de dependencias):
+`icd_runtime/bitio.py` (L0) ← `<pkg>/types.py` (L1: escalado
+lineal/enum/LUT) ← `<pkg>/<estructura>.py` (L2: dataclass + pack/unpack de
+bits) ← `<pkg>/<mensaje>.py` (L3: encode/decode). Cabeceras de "no editar",
+trazabilidad `xmi:id` por clase, salida determinista, y **verificado contra
+`core/codec.py` como oráculo** (mismos bytes). Rechaza módulos con errores
+de validación; variantes/arrays se omiten con aviso (siguiente fase).
+
 ## Hoja de ruta
 
 - [x] Fase 1-2: modelo de dominio + parser + registro
 - [x] Fase 3: persistencia en JSON (guardar/cargar el modelo)
 - [x] Fase 4a: interfaz web (NiceGUI) — navegar y editar
-- [ ] Fase 4b: generación de código (Jinja2 → Ada/Python) — ver
-  [`docs/codegen_spec.md`](docs/codegen_spec.md)
+- [x] Fase 4b-1: generador de código **Python** (Jinja2, verificado contra el
+  codec-oráculo) — ver [`docs/codegen_spec.md`](docs/codegen_spec.md)
+- [ ] Fase 4b-2: backend **Ada 95** sobre el mismo andamiaje
+- [ ] Fase 4b-3: variantes y arrays variables en el código generado

@@ -1,0 +1,36 @@
+# ==========================================================================
+# CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+# Modulo ICD: {{ m.icd_name }} ({{ m.source_file }})
+# Capa L2: tipo compuesto (layout de bits, numeracion ICD 1-based)
+# ==========================================================================
+"""{{ f.docstring }}"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass{% if needs_factory %}, field{% endif %}
+
+from icd_runtime import bitio
+{% for module, cls in f.imports %}from {{ module }} import {{ cls }}
+{% endfor %}
+
+{% for c in f.classes %}
+
+@dataclass
+class {{ c.class_name }}:
+    """{{ c.kind_label }} '{{ c.icd_name }}' — ICD: {{ c.path }} [{{ c.icd_id }}]"""
+
+{% for fld in c.fields %}    {{ fld.py_name }}: {{ fld.py_type }} = {{ fld.default_expr }}  # {{ fld.comment }}
+{% endfor %}
+    BIT_LENGTH = {{ c.bit_length }}
+
+    def pack_into(self, buf: bitio.BitBuffer, base: int) -> None:
+{% for fld in c.fields %}        {{ fld.pack_stmt }}
+{% endfor %}
+
+    @classmethod
+    def unpack_from(cls, buf: bitio.BitBuffer, base: int) -> "{{ c.class_name }}":
+        return cls(
+{% for fld in c.fields %}            {{ fld.unpack_expr }},
+{% endfor %}        )
+
+{% endfor %}
