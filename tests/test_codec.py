@@ -1,8 +1,9 @@
 """Tests del codec de referencia (encode/decode dirigido por el modelo).
 
 Los bytes esperados están calculados a mano según la convención documentada
-en core/codec.py (bit 0 = primer bit del mensaje, MSB-first; campo en
-[max_position - length + 1 .. max_position]).
+en core/codec.py: numeración de bits 1-based (el bit 1 es el primer bit del
+mensaje, confirmado por el usuario), MSB-first; un campo de longitud L con
+max_position=P ocupa los bits [P-L+1 .. P] (1-based).
 
 Ejecutar con:  python3 tests/test_codec.py   (o python -m pytest tests/)
 """
@@ -171,7 +172,7 @@ def _synthetic_record_with_array(fcs):
     waypoints = fcs.find_one(ArrayType, "Waypoints")
     head_t = ScalarType(name="HeadT", bit_length=16, encoding="twoComplement")
     rec = RecordType(name="R")
-    f_head = Field(name="head", position=BitPosition(max_position=15), inline=head_t)
+    f_head = Field(name="head", position=BitPosition(max_position=16), inline=head_t)
     f_arr = Field(name="wps", position=BitPosition(word16=1), inline=waypoints)
     rec.fields = [f_head, f_arr]
     return rec
@@ -207,7 +208,7 @@ def test_text_field():
     fcs, _ = _load()
     callsign = fcs.find_one(TextType, "CallSign")     # 8 chars ASCII
     rec = RecordType(name="T")
-    rec.fields = [Field(name="cs", position=BitPosition(max_position=63),
+    rec.fields = [Field(name="cs", position=BitPosition(max_position=64),
                         inline=callsign)]
     data = encode_type(rec, {"cs": "IBE32"})
     assert data == b"IBE32   "
@@ -219,8 +220,8 @@ def test_bcd_and_ieee754():
     bcd = ScalarType(name="bcd", bit_length=16, encoding="BCD")
     flt = ScalarType(name="flt", bit_length=32, encoding="IEEE754")
     rec.fields = [
-        Field(name="n", position=BitPosition(max_position=15), inline=bcd),
-        Field(name="x", position=BitPosition(max_position=47), inline=flt),
+        Field(name="n", position=BitPosition(max_position=16), inline=bcd),
+        Field(name="x", position=BitPosition(max_position=48), inline=flt),
     ]
     data = encode_type(rec, {"n": 1234, "x": 1.5})
     assert data == bytes.fromhex("1234" "3FC00000")
@@ -245,7 +246,7 @@ def test_field_after_variable_array_rejected():
     fcs, _ = _load()
     rec = _synthetic_record_with_array(fcs)
     tail_t = ScalarType(name="TailT", bit_length=8, encoding="twoComplement")
-    rec.fields.append(Field(name="tail", position=BitPosition(max_position=63),
+    rec.fields.append(Field(name="tail", position=BitPosition(max_position=64),
                             inline=tail_t))
     try:
         encode_type(rec, {"head": 0, "wps": [], "tail": 0})

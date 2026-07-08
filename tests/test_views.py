@@ -31,7 +31,7 @@ def test_message_rows_flattens_structure():
     assert [r.name for r in rows] == ["speedField", "altField", "counterField"]
     speed, alt, counter = rows
 
-    assert speed.position == "15"          # max_position
+    assert speed.position == "16"          # max_position (1-based)
     assert speed.length == "16"            # longitud en bits
     assert "AirSpeed" in speed.type_name
     assert speed.coding == "twoComplement"

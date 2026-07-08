@@ -21,12 +21,12 @@
 
     <!-- estructura interna reutilizable -->
     <data xsi:type="Data:Structure" id="_st_inner" name="InnerBlock" length="16">
-      <dataField id="_if_temp" name="innerTemp" maxPosition="15" w16="0" w16_b="0" with="_s_temp"/>
+      <dataField id="_if_temp" name="innerTemp" maxPosition="16" w16="0" w16_b="0" with="_s_temp"/>
     </data>
 
     <!-- estructura externa que anida la interna (para probar el colapso) -->
     <data xsi:type="Data:Structure" id="_st_outer" name="OuterBlock" length="48">
-      <dataField id="_of_status" name="status" maxPosition="7" w16="0" w16_b="0">
+      <dataField id="_of_status" name="status" maxPosition="8" w16="0" w16_b="0">
         <owns xsi:type="Data:Signal" id="_s_status" name="STATUS" length="8" defaultValue="NO_STATEMENT">
           <scal id="_sc_status">
             <owns xsi:type="Scal:Enums" id="_en_status">
@@ -36,7 +36,7 @@
           </scal>
         </owns>
       </dataField>
-      <dataField id="_of_sub" name="subBlock" maxPosition="31" w16="1" w16_b="0" with="_st_inner"/>
+      <dataField id="_of_sub" name="subBlock" maxPosition="32" w16="1" w16_b="0" with="_st_inner"/>
     </data>
 
     <data xsi:type="Data:Message" id="_msg_outer" name="OuterMsg"

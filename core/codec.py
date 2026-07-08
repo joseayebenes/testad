@@ -5,15 +5,16 @@ Empaqueta y desempaqueta mensajes interpretando directamente el modelo
 ("oráculo") contra la que se verificará el código autogenerado (Ada/Python),
 y la que usa el panel interactivo de la web.
 
-CONVENCIÓN DE BITS (supuesta, pendiente de confirmar con un mensaje real)
+CONVENCIÓN DE BITS (numeración 1-based CONFIRMADA por el usuario)
 -------------------------------------------------------------------------
-* El bit 0 es el PRIMER bit del mensaje; dentro de cada byte, el bit 0 es el
-  más significativo (MSB-first, orden de red).
+* La numeración de bits del ICD **empieza en 1**: el bit 1 es el PRIMER bit
+  del mensaje. Dentro de cada byte, el primer bit es el más significativo
+  (MSB-first, orden de red).
 * Un campo de longitud L con ``max_position = P`` ocupa los bits
-  ``[P - L + 1 .. P]`` (P es el último bit ocupado). Es coherente con los
-  ICD reales observados (maxPosition="49" con w16="4" w16_b="1"...).
-* Si ``max_position`` es 0, se usa el fallback ``w16*16 + w16_b`` (o
-  ``w12*12 + w12_b`` si solo hay palabras de 12 bits) como bit inicial.
+  ``[P - L + 1 .. P]`` en numeración 1-based (P es el último bit ocupado).
+  Internamente el buffer usa índices 0-based: ``start = P - L``.
+* Si ``max_position`` es 0 (ausente), se usa el fallback ``w16*16 + w16_b``
+  (o ``w12*12 + w12_b``) como bit inicial 0-based.
 * Los valores multibit se almacenan MSB primero a lo largo de su rango.
 
 LIMITACIONES DOCUMENTADAS
@@ -126,14 +127,20 @@ def _field_bits(f: Field) -> int:
 
 
 def field_span(f: Field) -> Tuple[int, int]:
-    """(bit_inicial, longitud) de un campo según la convención del módulo."""
+    """(bit_inicial_0based, longitud) de un campo.
+
+    max_position es 1-based (el ICD numera los bits desde 1): un campo de
+    longitud L con max_position=P ocupa [P-L+1 .. P] 1-based, es decir,
+    empieza en el índice interno P-L (0-based).
+    """
     length = _field_bits(f)
     p = f.position
     if p.max_position > 0:
-        start = p.max_position - length + 1
+        start = p.max_position - length
         if start < 0:
             raise CodecError(
-                f"campo '{f.name}': max_position={p.max_position} < longitud {length}")
+                f"campo '{f.name}': max_position={p.max_position} (1-based) "
+                f"< longitud {length}")
         return start, length
     if p.word16 or p.bit16:
         return p.word16 * 16 + p.bit16, length
@@ -275,7 +282,8 @@ def _composite_bits(comp: CompositeType, values: Optional[Dict[str, Any]]) -> in
 def _array_start(f: Field) -> int:
     p = f.position
     if p.max_position > 0:
-        return p.max_position  # convención: para arrays, posición inicial explícita
+        # para arrays, max_position indica su bit inicial (1-based) -> 0-based
+        return p.max_position - 1
     if p.word16 or p.bit16:
         return p.word16 * 16 + p.bit16
     return 0

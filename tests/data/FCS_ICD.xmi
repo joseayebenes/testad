@@ -37,11 +37,11 @@
   <folder id="_f_messages" name="Messages">
     <folder id="_f_nav" name="Navigation">
       <data xsi:type="Data:Structure" id="_st_navblock" name="NavBlock" length="48">
-        <dataField id="_df_speed" name="speedField" maxPosition="15" w16="0" w16_b="0" with="_sig_speed"/>
-        <dataField id="_df_alt" name="altField" maxPosition="39" w16="1" w16_b="0">
+        <dataField id="_df_speed" name="speedField" maxPosition="16" w16="0" w16_b="0" with="_sig_speed"/>
+        <dataField id="_df_alt" name="altField" maxPosition="40" w16="1" w16_b="0">
           <with xsi:type="Data:Signal" href="BaseSignals.xmi#_sig_alt"/>
         </dataField>
-        <dataField id="_df_counter" name="counterField" maxPosition="47" w16="2" w16_b="0">
+        <dataField id="_df_counter" name="counterField" maxPosition="48" w16="2" w16_b="0">
           <owns xsi:type="Data:Signal" id="_own_counter" name="frameCounter"
                 length="8" coding="twoComplement"/>
         </dataField>

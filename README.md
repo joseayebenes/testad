@@ -211,9 +211,9 @@ decode_message(msg, data, engineering=True)   # {'speedField': 10.0, ...}
 
 Soporta: registros anidados, variantes (con `_case`), arrays variables con
 contador, escalado lineal/enum/LUT, twoComplement/IEEE754/BCD/ASCII, valores
-por defecto y errores explícitos (`CodecError`). La convención de bits está
-documentada en la cabecera del módulo y **pendiente de confirmar contra un
-mensaje real** (campo en `[max_position-length+1 .. max_position]`, MSB-first).
+por defecto y errores explícitos (`CodecError`). Convención de bits
+(confirmada): **numeración 1-based** — el bit 1 es el primer bit del mensaje,
+MSB-first; un campo de longitud L con `max_position=P` ocupa `[P-L+1 .. P]`.
 
 ### Persistencia JSON
 

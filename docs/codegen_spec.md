@@ -105,6 +105,15 @@ deben cumplirlas y habrá comprobaciones automáticas donde sea posible.
 - Convención por lenguaje: Ada `Pascal_Snake` para tipos/paquetes; Python
   `snake_case` para funciones/campos y `PascalCase` para clases.
 
+### 2.6 bis Convención de bits del ICD (CONFIRMADA)
+
+La numeración de bits del ICD **empieza en 1** (el bit 1 es el primer bit
+del mensaje), MSB-first. Un campo de longitud L con `max_position = P`
+ocupa los bits `[P-L+1 .. P]` en numeración 1-based. La implementación de
+referencia es `core/codec.py::field_span` (índices internos 0-based:
+`start = P - L`); el código generado debe producir exactamente el mismo
+layout (verificado contra el codec como oráculo).
+
 ### 2.7 Restricciones de Ada 95  **[D-1]**
 
 El código Ada generado debe compilar como **Ada 95** (`-gnat95`). En
