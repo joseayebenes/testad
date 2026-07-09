@@ -26,8 +26,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Genera código desde ICDs.")
     parser.add_argument("folder", help="carpeta con el proyecto (JSON o XML)")
     parser.add_argument("--out", default="gen", help="carpeta de salida (def: gen/)")
-    parser.add_argument("--lang", default="python", choices=["python"],
-                        help="lenguaje destino (Ada 95 en preparación)")
+    parser.add_argument("--lang", default="python", choices=["python", "ada"],
+                        help="lenguaje destino")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 

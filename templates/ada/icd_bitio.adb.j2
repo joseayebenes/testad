@@ -1,0 +1,199 @@
+--  =======================================================================
+--  CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+--  Runtime L0 (Ada 95): cuerpo.
+--  =======================================================================
+
+with Unchecked_Conversion;
+
+package body ICD_Bitio is
+
+   use type Interfaces.Unsigned_64;
+
+   subtype U64 is Interfaces.Unsigned_64;
+   subtype I64 is Interfaces.Integer_64;
+   subtype U32 is Interfaces.Unsigned_32;
+
+   function To_U64 is new Unchecked_Conversion (I64, U64);
+   function To_I64 is new Unchecked_Conversion (U64, I64);
+   function F_To_U32 is new Unchecked_Conversion (Float, U32);
+   function U32_To_F is new Unchecked_Conversion (U32, Float);
+   function LF_To_U64 is new Unchecked_Conversion (Long_Float, U64);
+   function U64_To_LF is new Unchecked_Conversion (U64, Long_Float);
+
+   function Mask (Bits : Natural) return U64 is
+   begin
+      if Bits >= 64 then
+         return U64'Last;
+      end if;
+      return Interfaces.Shift_Left (1, Bits) - 1;
+   end Mask;
+
+   procedure Set_Bits (Data   : in out Byte_Array;
+                       Start  : Natural;
+                       Length : Natural;
+                       Value  : Interfaces.Unsigned_64) is
+      Pos      : Natural;
+      Byte_Ix  : Natural;
+      Bit_Mask : Byte;
+      Bit      : U64;
+   begin
+      if Length > 64 or else Start + Length > Data'Length * 8 then
+         raise Encode_Error;
+      end if;
+      for I in 0 .. Length - 1 loop
+         Bit := Interfaces.Shift_Right (Value, Length - 1 - I) and 1;
+         Pos := Start + I;
+         Byte_Ix := Data'First + Pos / 8;
+         Bit_Mask := 2 ** (7 - (Pos mod 8));
+         if Bit = 1 then
+            Data (Byte_Ix) := Data (Byte_Ix) or Bit_Mask;
+         else
+            Data (Byte_Ix) := Data (Byte_Ix) and not Bit_Mask;
+         end if;
+      end loop;
+   end Set_Bits;
+
+   function Get_Bits (Data   : Byte_Array;
+                      Start  : Natural;
+                      Length : Natural) return Interfaces.Unsigned_64 is
+      Value    : U64 := 0;
+      Pos      : Natural;
+      Byte_Ix  : Natural;
+      Bit_Mask : Byte;
+   begin
+      if Length > 64 or else Start + Length > Data'Length * 8 then
+         raise Decode_Error;
+      end if;
+      for I in 0 .. Length - 1 loop
+         Pos := Start + I;
+         Byte_Ix := Data'First + Pos / 8;
+         Bit_Mask := 2 ** (7 - (Pos mod 8));
+         if (Data (Byte_Ix) and Bit_Mask) /= 0 then
+            Value := Interfaces.Shift_Left (Value, 1) or 1;
+         else
+            Value := Interfaces.Shift_Left (Value, 1);
+         end if;
+      end loop;
+      return Value;
+   end Get_Bits;
+
+   function Enc_Twoc (Value : Interfaces.Integer_64;
+                      Bits  : Natural) return Interfaces.Unsigned_64 is
+      use type Interfaces.Integer_64;
+      Hi : I64;
+   begin
+      if Bits < 64 then
+         Hi := I64 (2) ** (Bits - 1) - 1;
+         if Value < -Hi - 1 or else Value > Hi then
+            raise Encode_Error;
+         end if;
+      end if;
+      return To_U64 (Value) and Mask (Bits);
+   end Enc_Twoc;
+
+   function Dec_Twoc (Raw  : Interfaces.Unsigned_64;
+                      Bits : Natural) return Interfaces.Integer_64 is
+      Sign : U64;
+   begin
+      if Bits >= 64 then
+         return To_I64 (Raw);
+      end if;
+      Sign := Interfaces.Shift_Left (1, Bits - 1);
+      if (Raw and Sign) /= 0 then
+         return To_I64 (Raw or not Mask (Bits));
+      end if;
+      return To_I64 (Raw);
+   end Dec_Twoc;
+
+   function Enc_Uint (Value : Interfaces.Unsigned_64;
+                      Bits  : Natural) return Interfaces.Unsigned_64 is
+   begin
+      if Value > Mask (Bits) then
+         raise Encode_Error;
+      end if;
+      return Value;
+   end Enc_Uint;
+
+   function Dec_Uint (Raw  : Interfaces.Unsigned_64;
+                      Bits : Natural) return Interfaces.Unsigned_64 is
+      pragma Warnings (Off, Bits);
+   begin
+      return Raw;
+   end Dec_Uint;
+
+   function Enc_F32 (Value : Float) return Interfaces.Unsigned_64 is
+   begin
+      return U64 (F_To_U32 (Value));
+   end Enc_F32;
+
+   function Dec_F32 (Raw : Interfaces.Unsigned_64) return Float is
+   begin
+      return U32_To_F (U32 (Raw and 16#FFFF_FFFF#));
+   end Dec_F32;
+
+   function Enc_F64 (Value : Long_Float) return Interfaces.Unsigned_64 is
+   begin
+      return LF_To_U64 (Value);
+   end Enc_F64;
+
+   function Dec_F64 (Raw : Interfaces.Unsigned_64) return Long_Float is
+   begin
+      return U64_To_LF (Raw);
+   end Dec_F64;
+
+   function Enc_Bcd (Value : Interfaces.Unsigned_64;
+                     Bits  : Natural) return Interfaces.Unsigned_64 is
+      V      : U64 := Value;
+      Result : U64 := 0;
+      Shift  : Natural := 0;
+   begin
+      if V = 0 then
+         return 0;
+      end if;
+      while V > 0 loop
+         if Shift + 4 > Bits then
+            raise Encode_Error;
+         end if;
+         Result := Result or Interfaces.Shift_Left (V mod 10, Shift);
+         V := V / 10;
+         Shift := Shift + 4;
+      end loop;
+      return Result;
+   end Enc_Bcd;
+
+   function Dec_Bcd (Raw  : Interfaces.Unsigned_64;
+                     Bits : Natural) return Interfaces.Unsigned_64 is
+      Result : U64 := 0;
+      Shift  : Integer := Bits - 4;
+   begin
+      while Shift >= 0 loop
+         Result := Result * 10
+           + (Interfaces.Shift_Right (Raw, Natural (Shift)) and 15);
+         Shift := Shift - 4;
+      end loop;
+      return Result;
+   end Dec_Bcd;
+
+   procedure Put_Ascii (Data  : in out Byte_Array;
+                        Start : Natural;
+                        Item  : String) is
+      Pos : Natural := Start;
+   begin
+      for I in Item'Range loop
+         Set_Bits (Data, Pos, 8, U64 (Character'Pos (Item (I))));
+         Pos := Pos + 8;
+      end loop;
+   end Put_Ascii;
+
+   procedure Get_Ascii (Data  : Byte_Array;
+                        Start : Natural;
+                        Item  : out String) is
+      Pos : Natural := Start;
+   begin
+      for I in Item'Range loop
+         Item (I) := Character'Val (Natural (Get_Bits (Data, Pos, 8)));
+         Pos := Pos + 8;
+      end loop;
+   end Get_Ascii;
+
+end ICD_Bitio;

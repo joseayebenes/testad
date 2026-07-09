@@ -1,0 +1,43 @@
+--  =======================================================================
+--  CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+--  Modulo ICD: {{ m.icd_name }} ({{ m.source_file }})
+--  Capa L3: mensaje (Encode/Decode con valores crudos; el escalado esta en
+--  {{ m.root_pkg }}.Types, separado a proposito). {{ f.doc }}
+--  =======================================================================
+
+with ICD_Bitio;
+{% for w in f.withs %}with {{ w }};
+{% endfor %}
+
+package {{ f.package_name }} is
+
+{% for c in f.classes %}
+   --  {{ c.kind_label }} '{{ c.icd_name }}' -- ICD: {{ c.path }} [{{ c.icd_id }}]
+{% for line in c.local_decls %}   {{ line }}
+{% endfor %}
+   type {{ c.type_name }} is record
+{% for comp in c.components %}      {{ comp.name }} : {{ comp.type_name }}{{ comp.default }};  --  {{ comp.comment }}
+{% endfor %}   end record;
+
+   {{ c.type_name }}_Bit_Length : constant := {{ c.bit_length }};
+
+   procedure Pack (Item : {{ c.type_name }};
+                   Data : in out ICD_Bitio.Byte_Array;
+                   Base : Natural);
+   procedure Unpack (Item : out {{ c.type_name }};
+                     Data : ICD_Bitio.Byte_Array;
+                     Base : Natural);
+
+{% endfor %}
+   Byte_Length : constant := {{ f.message.byte_length }};
+   Period      : constant := {{ f.message.period }};
+   Rate_Mode   : constant String := "{{ f.message.rate_mode }}";
+
+   subtype Message_Bytes is ICD_Bitio.Byte_Array (1 .. Byte_Length);
+
+   procedure Encode (Item : {{ f.message.payload_ref }};
+                     Data : out Message_Bytes);
+   procedure Decode (Data : Message_Bytes;
+                     Item : out {{ f.message.payload_ref }});
+
+end {{ f.package_name }};

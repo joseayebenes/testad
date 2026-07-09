@@ -1,0 +1,33 @@
+--  =======================================================================
+--  CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+--  Modulo ICD: {{ m.icd_name }} ({{ m.source_file }})
+--  Capa L1: tipos escalares/texto y su escalado (crudo <-> ingenieria).
+--  =======================================================================
+
+package {{ m.root_pkg }}.Types is
+
+{% for s in m.scalars %}
+   --  ICD: {{ s.path }} [{{ s.icd_id }}]{% if s.units %} ({{ s.units }}){% endif %}
+
+{% for line in s.decl_lines %}   {{ line }}
+{% endfor %}
+{% if s.kind == "linear" %}
+   function To_Eng (Raw : {{ s.raw_type }}) return Float;
+   function From_Eng (Value : Float) return {{ s.raw_type }};
+{% elif s.kind == "enum" %}
+   type {{ s.eng_type }} is
+     ({% for lit, v in s.literals %}{{ lit }}{% if not loop.last %}, {% endif %}{% endfor %});
+
+   function To_Eng (Raw : {{ s.raw_type }}) return {{ s.eng_type }};
+   function From_Eng (Value : {{ s.eng_type }}) return {{ s.raw_type }};
+{% elif s.kind == "lut" %}
+   function To_Eng (Raw : {{ s.raw_type }}) return Float;
+   function From_Eng (Value : Float) return {{ s.raw_type }};
+{% endif %}
+{% endfor %}
+{% for t in m.texts %}
+   --  ICD: {{ t.path }} [{{ t.icd_id }}]
+   subtype {{ t.subtype_name }} is String (1 .. {{ t.chars }});
+{% endfor %}
+
+end {{ m.root_pkg }}.Types;

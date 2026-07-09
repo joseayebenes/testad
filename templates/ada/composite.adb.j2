@@ -1,0 +1,29 @@
+--  =======================================================================
+--  CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+--  Modulo ICD: {{ m.icd_name }} ({{ m.source_file }})
+--  Capa L2: cuerpo de Pack/Unpack. {{ f.doc }}
+--  =======================================================================
+
+with Interfaces;
+
+package body {{ f.package_name }} is
+
+{% for c in f.classes %}
+   procedure Pack (Item : {{ c.type_name }};
+                   Data : in out ICD_Bitio.Byte_Array;
+                   Base : Natural) is
+   begin
+{% for s in c.pack_stmts %}      {{ s }}
+{% else %}      null;
+{% endfor %}   end Pack;
+
+   procedure Unpack (Item : out {{ c.type_name }};
+                     Data : ICD_Bitio.Byte_Array;
+                     Base : Natural) is
+   begin
+{% for s in c.unpack_stmts %}      {{ s }}
+{% else %}      null;
+{% endfor %}   end Unpack;
+
+{% endfor %}
+end {{ f.package_name }};

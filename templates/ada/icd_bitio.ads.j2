@@ -1,0 +1,62 @@
+--  =======================================================================
+--  CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+--  Runtime L0 (Ada 95): E/S de bits y codificaciones.
+--  Convencion del ICD: numeracion de bits 1-based, MSB-first; internamente
+--  los indices son 0-based. El endianness lo materializa este runtime campo
+--  a campo (Ada 95 no tiene Scalar_Storage_Order).
+--  =======================================================================
+
+with Interfaces;
+
+package ICD_Bitio is
+
+   Encode_Error : exception;
+   Decode_Error : exception;
+
+   type Byte is mod 2 ** 8;
+   for Byte'Size use 8;
+
+   type Byte_Array is array (Positive range <>) of Byte;
+
+   procedure Set_Bits (Data   : in out Byte_Array;
+                       Start  : Natural;
+                       Length : Natural;
+                       Value  : Interfaces.Unsigned_64);
+
+   function Get_Bits (Data   : Byte_Array;
+                      Start  : Natural;
+                      Length : Natural) return Interfaces.Unsigned_64;
+
+   --  Complemento a dos
+   function Enc_Twoc (Value : Interfaces.Integer_64;
+                      Bits  : Natural) return Interfaces.Unsigned_64;
+   function Dec_Twoc (Raw  : Interfaces.Unsigned_64;
+                      Bits : Natural) return Interfaces.Integer_64;
+
+   --  Natural (sin signo)
+   function Enc_Uint (Value : Interfaces.Unsigned_64;
+                      Bits  : Natural) return Interfaces.Unsigned_64;
+   function Dec_Uint (Raw  : Interfaces.Unsigned_64;
+                      Bits : Natural) return Interfaces.Unsigned_64;
+
+   --  IEEE754
+   function Enc_F32 (Value : Float) return Interfaces.Unsigned_64;
+   function Dec_F32 (Raw : Interfaces.Unsigned_64) return Float;
+   function Enc_F64 (Value : Long_Float) return Interfaces.Unsigned_64;
+   function Dec_F64 (Raw : Interfaces.Unsigned_64) return Long_Float;
+
+   --  BCD
+   function Enc_Bcd (Value : Interfaces.Unsigned_64;
+                     Bits  : Natural) return Interfaces.Unsigned_64;
+   function Dec_Bcd (Raw  : Interfaces.Unsigned_64;
+                     Bits : Natural) return Interfaces.Unsigned_64;
+
+   --  Texto ASCII (8 bits por caracter, longitud del String)
+   procedure Put_Ascii (Data  : in out Byte_Array;
+                        Start : Natural;
+                        Item  : String);
+   procedure Get_Ascii (Data  : Byte_Array;
+                        Start : Natural;
+                        Item  : out String);
+
+end ICD_Bitio;

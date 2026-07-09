@@ -238,10 +238,12 @@ Flujo típico: cargar XML → editar en memoria → `save_module` (JSON) →
 ## Generación de código
 
 Generador Jinja2 sobre el modelo (`core/codegen/`, spec en
-[`docs/codegen_spec.md`](docs/codegen_spec.md)). Backend Python operativo:
+[`docs/codegen_spec.md`](docs/codegen_spec.md)). Backends **Python** y
+**Ada 95** operativos:
 
 ```bash
-python3 -m core.codegen project_json --out gen/     # o carpeta XML
+python3 -m core.codegen project_json --out gen/                 # Python
+python3 -m core.codegen project_json --out gen_ada/ --lang ada  # Ada 95
 ```
 
 Genera por cada módulo ICD un paquete por capas (norma de dependencias):
@@ -252,6 +254,14 @@ trazabilidad `xmi:id` por clase, salida determinista, y **verificado contra
 `core/codec.py` como oráculo** (mismos bytes). Rechaza módulos con errores
 de validación; variantes/arrays se omiten con aviso (siguiente fase).
 
+En Ada 95 la estructura es espejo con paquetes hijos: `icd_bitio.ads/.adb`
+(L0) ← `<Pkg>-types` (L1, tipos con rango y `for T'Size use N`) ←
+`<Pkg>-<estructura>` (L2, record + Pack/Unpack) ← `<Pkg>-<mensaje>` (L3,
+Encode/Decode); referencias entre módulos ICD via `with`. Cumple las
+restricciones de Ada 95 (sin aspects ni `Scalar_Storage_Order`: el
+endianness lo materializa el runtime) y el test compila con GNAT
+`-gnat95` y ejecuta el binario comparando bytes con el oráculo.
+
 ## Hoja de ruta
 
 - [x] Fase 1-2: modelo de dominio + parser + registro
@@ -259,5 +269,6 @@ de validación; variantes/arrays se omiten con aviso (siguiente fase).
 - [x] Fase 4a: interfaz web (NiceGUI) — navegar y editar
 - [x] Fase 4b-1: generador de código **Python** (Jinja2, verificado contra el
   codec-oráculo) — ver [`docs/codegen_spec.md`](docs/codegen_spec.md)
-- [ ] Fase 4b-2: backend **Ada 95** sobre el mismo andamiaje
+- [x] Fase 4b-2: backend **Ada 95** (compilado con GNAT `-gnat95` y
+  verificado contra el oráculo en ejecución)
 - [ ] Fase 4b-3: variantes y arrays variables en el código generado

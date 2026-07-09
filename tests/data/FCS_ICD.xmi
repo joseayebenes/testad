@@ -17,7 +17,7 @@
         <owns xsi:type="Scal:Lineal" id="_ln_speed" lsb="0.0625" offset="0" units="kt"/>
       </scal>
     </data>
-    <data xsi:type="Data:Signal" id="_sig_gear" name="GearStatus" length="2" coding="twoComplement">
+    <data xsi:type="Data:Signal" id="_sig_gear" name="GearStatus" length="3" coding="twoComplement">
       <scal id="_sc_gear">
         <owns xsi:type="Scal:Enums" id="_en_gear" name="GEAR_STATES">
           <tag id="_tg0" name="UP" value="0"/>
