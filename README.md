@@ -133,6 +133,9 @@ Visores (`web/views.py`):
   misma **vista de campos** del visor de mensaje: tabla con length (bit),
   max_position, codificación y escalado, subestructuras colapsables y
   enlaces a referencias.
+* **Generar código** — botón en la barra: elige lenguaje (Python/Ada 95) y
+  carpeta de salida, genera todos los módulos válidos y muestra por módulo
+  los ficheros, los avisos y los errores de validación que impiden generar.
 * **Panel Codificar/Decodificar** — en mensajes, **estructuras, variantes
   y campos de tipo compuesto**; dos pestañas sincronizadas: **Tabla** (una
   fila por campo, rellenable; al decodificar se recuperan los valores en

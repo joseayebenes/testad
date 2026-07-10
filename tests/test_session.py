@@ -223,6 +223,23 @@ def test_import_xml_then_work_from_json():
         assert reopened.bit_length == 99
 
 
+def test_generate_code_from_session():
+    """La sesión genera código para los módulos válidos y reporta los rotos."""
+    import tempfile
+    s = _session()
+    with tempfile.TemporaryDirectory() as tmp:
+        results, errors = s.generate_code(tmp, language="python")
+        # 3 válidos (Base, FCS, Nested), Broken reportado como error
+        assert {r.package for r in results} == {"base_signals", "fcs_icd", "nested_icd"}
+        assert len(errors) == 1 and errors[0][0] == "Broken_ICD"
+        assert "sin longitud en bits" in errors[0][1]
+        assert os.path.exists(os.path.join(tmp, "fcs_icd", "nav_msg.py"))
+    with tempfile.TemporaryDirectory() as tmp:
+        results, errors = s.generate_code(tmp, language="ada")
+        assert len(results) == 3 and len(errors) == 1
+        assert os.path.exists(os.path.join(tmp, "fcs_icd-nav_msg.ads"))
+
+
 def _run_all():
     failures = 0
     for name, fn in sorted(globals().items()):

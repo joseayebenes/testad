@@ -932,6 +932,52 @@ class ICDApp:
         written = self.session.import_xml(xml_folder, json_folder)
         self._reload_tree(f"XML importado y guardado como JSON ({len(written)} módulos) en {json_folder}")
 
+    def _open_codegen(self) -> None:
+        """Diálogo de generación de código: lenguaje, carpeta y resultados."""
+        if not self.session.modules:
+            ui.notify("Carga un proyecto antes de generar código", type="warning")
+            return
+        with ui.dialog() as dialog, ui.card().classes("w-[560px]"):
+            ui.label("Generar código").classes("text-bold")
+            with ui.row().classes("items-center gap-3 w-full"):
+                lang = ui.select({"python": "Python", "ada": "Ada 95"},
+                                 value="python", label="lenguaje") \
+                    .props("dense outlined").classes("w-40")
+                out_in = ui.input("carpeta de salida", value="gen") \
+                    .props("dense outlined").classes("w-64")
+            results_box = ui.column().classes("w-full")
+
+            def do_generate() -> None:
+                results_box.clear()
+                results, errors = self.session.generate_code(
+                    out_in.value or "gen", language=lang.value)
+                total = sum(len(r.files) for r in results)
+                with results_box:
+                    ui.label(f"{len(results)} módulos generados · {total} ficheros "
+                             f"en '{out_in.value}'").classes("text-positive")
+                    for r in results:
+                        with ui.expansion(f"{r.package} — {len(r.files)} ficheros"
+                                          + (f" · {len(r.warnings)} avisos" if r.warnings else "")) \
+                                .classes("w-full"):
+                            for path in sorted(r.files):
+                                ui.label(path).classes("text-xs").style("font-family:monospace;")
+                            for w in r.warnings:
+                                ui.label(f"AVISO: {w}").classes("text-warning text-xs")
+                    for name, reason in errors:
+                        with ui.expansion(f"✗ {name} — no generado").classes("w-full"):
+                            ui.label(reason).classes("text-negative text-xs") \
+                                .style("white-space:pre-wrap;")
+                if errors:
+                    ui.notify(f"{len(errors)} módulos con errores de validación",
+                              type="warning")
+                else:
+                    ui.notify("Generación completada", type="positive")
+
+            with ui.row().classes("gap-2"):
+                ui.button("Generar", icon="code", on_click=do_generate).props("dense")
+                ui.button("cerrar", on_click=dialog.close).props("flat dense")
+        dialog.open()
+
     def _save(self) -> None:
         if not self.session.modules:
             ui.notify("No hay nada que guardar", type="warning")
@@ -977,6 +1023,9 @@ class ICDApp:
             ui.button("Importar", icon="upload_file",
                       on_click=lambda: self._import_xml(xml_in.value, proj_in.value)) \
                 .props("dense outline").tooltip("Cargar XML una vez y guardarlo como JSON de proyecto")
+            ui.separator().props("vertical dark")
+            ui.button("Generar código", icon="code", on_click=self._open_codegen) \
+                .props("dense outline")
             ui.space()
             self.status_label = ui.label("").classes("text-sm")
 

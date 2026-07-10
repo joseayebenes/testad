@@ -420,6 +420,25 @@ class WorkSession:
         return sum(1 for i in self.issues if i.level == "WARNING")
 
     # ------------------------------------------------------------------ #
+    # Generación de código
+    # ------------------------------------------------------------------ #
+    def generate_code(self, out_dir: str, language: str = "python"):
+        """Genera código para todos los módulos cargados.
+
+        Devuelve (resultados, errores): los módulos que no validan no
+        detienen a los demás; se reportan como (nombre, motivo).
+        """
+        from core.codegen.generator import CodegenError, generate
+
+        results, errors = [], []
+        for module in self.modules:
+            try:
+                results.append(generate(module, out_dir, language=language))
+            except CodegenError as exc:
+                errors.append((module.name, str(exc)))
+        return results, errors
+
+    # ------------------------------------------------------------------ #
     # Guardado
     # ------------------------------------------------------------------ #
     def save_all_json(self, folder: str) -> List[str]:
