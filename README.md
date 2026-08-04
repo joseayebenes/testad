@@ -18,9 +18,9 @@ metadato del XML (namespaces, atributos crudos, xsi:types...).
 
 ```
 main.py          CLI: carga todos los ICD de una carpeta y muestra resultados
+mcp_server.py    Servidor MCP: expone mensajes, campos y tipos a un agente
 web/
   session.py     Estado de una sesión de trabajo (envuelve core/, sin UI)
-  views.py       Lógica de los visores (mensaje aplanado, decodificación de tipo)
   app.py         Interfaz web NiceGUI: árbol, editor, visores, validación
 core/
   model.py       Modelo de dominio (sistema de tipos + transmisión + organización)
@@ -29,6 +29,9 @@ core/
   validation.py  Validador: campos obligatorios, solapamientos, refs rotas...
   persistence.py Guardar/cargar el modelo en JSON (formato propio)
   codec.py       Codec de referencia: encode/decode de mensajes desde el modelo
+  views.py       Vistas del modelo (mensaje aplanado, decodificación de tipo)
+  query.py       API de consulta JSON-serializable (la que expone el MCP)
+  codegen/       Generador de código (Jinja2 -> Python / Ada 95)
 tests/
   data/          XMIs de ejemplo fieles al formato de producción
   test_parser.py
@@ -36,6 +39,9 @@ tests/
   test_persistence.py
   test_session.py     lógica de edición de la web (crear/borrar/referencias)
   test_views.py       lógica de los visores de mensaje y de tipo
+  test_codec.py       encode/decode de referencia
+  test_codegen*.py    generador Python y Ada 95 (compila con GNAT)
+  test_mcp_server.py  API de consulta y servidor MCP end-to-end
 ```
 
 ## El modelo
@@ -120,7 +126,7 @@ Edición:
 * **Campos de estructuras** — añadir/borrar campos de registros, arrays y
   variantes desde el visor de tipo.
 
-Visores (`web/views.py`):
+Visores (`core/views.py`):
 
 * **Visor de mensaje** — muestra el mensaje completo aplanado en una tabla:
   cada campo con `length (bit)`, `max_position`, tipo, codificación,
@@ -237,6 +243,48 @@ registry.resolve_references()                  # re-enlaza las referencias
 
 Flujo típico: cargar XML → editar en memoria → `save_module` (JSON) →
 `load_module` para recuperar el trabajo sin volver a tocar el XML.
+
+## Servidor MCP (para agentes)
+
+`mcp_server.py` expone el modelo por [MCP](https://modelcontextprotocol.io)
+para que un agente consulte mensajes, campos y tipos sin conocer el formato
+XML:
+
+```bash
+pip install -r requirements.txt
+python3 mcp_server.py --project ./project_json     # también acepta carpeta XML
+```
+
+Configuración en un cliente MCP (`.mcp.json`, `claude_desktop_config.json`...):
+
+```json
+{
+  "mcpServers": {
+    "icdms": {
+      "command": "python3",
+      "args": ["/ruta/a/testad/mcp_server.py", "--project", "/ruta/al/proyecto"]
+    }
+  }
+}
+```
+
+Herramientas expuestas:
+
+| Herramienta | Qué devuelve |
+|---|---|
+| `load_project` | Carga una carpeta (JSON de proyecto o XML) y resume lo cargado |
+| `list_modules` | Módulos con su número de mensajes y tipos |
+| `list_messages` | Mensajes con periodo, modo y payload (filtra por módulo/nombre) |
+| `get_message` | **Mensaje con su tabla de campos aplanada** (subestructuras incluidas): bits, `max_position`, tipo, codificación, escalado, condición y origen |
+| `get_field` | Un campo concreto de un mensaje o tipo |
+| `list_types` / `get_type` | Tipos y **cómo se decodifican** (lineal, estados de enum, tramos de LUT) |
+| `search` | Búsqueda por nombre o `xmi:id` en todos los módulos |
+| `list_issues` | Incidencias de validación (filtra por módulo/nivel) |
+| `decode_message` / `encode_message` | Bytes hex ↔ valores de campo, en unidades de ingeniería o crudas |
+
+La lógica está en `core/query.py` (`ICDQuery`), utilizable también sin MCP.
+Los nombres se resuelven por `xmi:id` o por nombre; si un nombre es ambiguo
+se devuelve un error con los candidatos en vez de elegir en silencio.
 
 ## Generación de código
 

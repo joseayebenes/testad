@@ -3,6 +3,8 @@
 nicegui>=3.0
 # El generador de código necesita:
 jinja2>=3.0
+# El servidor MCP (mcp_server.py) necesita:
+mcp>=2.0
 
 # Para las pruebas end-to-end de la web (opcional, solo desarrollo):
 #   pip install playwright && playwright install chromium

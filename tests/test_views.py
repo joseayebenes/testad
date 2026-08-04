@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.model import ArrayType, Message, ScalarType, VariantType
 from core.parser import ICDParser
 from core.registry import ICDRegistry
-from web.views import flatten, message_rows, scaling_detail, type_view
+from core.views import flatten, message_rows, scaling_detail, type_view
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 

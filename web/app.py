@@ -33,7 +33,7 @@ from core.model import (
     TypeDef, VariantType,
 )
 from web.session import WorkSession
-from web import views
+from core import views
 
 # Atributos que nunca se muestran/editan en la ficha (navegación interna).
 _HIDDEN_ATTRS = {"parent"}
