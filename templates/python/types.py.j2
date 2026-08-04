@@ -1,0 +1,88 @@
+# ==========================================================================
+# CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+# Modulo ICD: {{ m.icd_name }} ({{ m.source_file }})
+# Capa L1: tipos escalares/texto y su escalado (crudo <-> ingenieria)
+# ==========================================================================
+"""Tipos de '{{ m.icd_name }}': constantes de decodificación y escalado."""
+
+from __future__ import annotations
+
+{% for s in m.scalars %}
+
+class {{ s.class_name }}:
+    """ICD: {{ s.path }} [{{ s.icd_id }}]"""
+
+    BITS = {{ s.bits }}
+    ENCODING = "{{ s.encoding }}"
+{% if s.units %}    UNITS = "{{ s.units }}"
+{% endif %}
+{%- if s.scaling_kind == "linear" %}
+    LSB = {{ s.lsb }}
+    OFFSET = {{ s.offset }}
+
+    @staticmethod
+    def to_eng(raw: int) -> float:
+        return raw * {{ s.lsb }} + {{ s.offset }}
+
+    @staticmethod
+    def from_eng(value: float) -> int:
+        return int(round((value - {{ s.offset }}) / {{ s.lsb }}))
+{%- elif s.scaling_kind == "enum" %}
+    LABELS = {{ '{' }}{% for v, t in s.labels %}{{ v }}: "{{ t }}"{% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }}
+
+    @staticmethod
+    def to_eng(raw: int) -> str:
+        try:
+            return {{ s.class_name }}.LABELS[raw]
+        except KeyError:
+            raise ValueError(f"valor {raw} sin estado definido") from None
+
+    @staticmethod
+    def from_eng(label: str) -> int:
+        for value, name in {{ s.class_name }}.LABELS.items():
+            if name == label:
+                return value
+        raise ValueError(f"estado '{label}' no definido")
+{%- elif s.scaling_kind == "lut" %}
+    RANGES = (  # (desde, hasta, lsb, offset)
+{% for b, e, l, o in s.ranges %}        ({{ b }}, {{ e }}, {{ l }}, {{ o }}),
+{% endfor %}    )
+
+    @staticmethod
+    def to_eng(raw: int) -> float:
+        for begin, end, lsb, offset in {{ s.class_name }}.RANGES:
+            if begin <= raw <= end:
+                return raw * lsb + offset
+        raise ValueError(f"valor {raw} fuera de los tramos de la LUT")
+
+    @staticmethod
+    def from_eng(value: float) -> int:
+        for begin, end, lsb, offset in {{ s.class_name }}.RANGES:
+            if lsb == 0:
+                continue
+            raw = (value - offset) / lsb
+            if begin <= raw <= end:
+                return int(round(raw))
+        raise ValueError(f"valor {value} no invertible con la LUT")
+{%- else %}
+
+    @staticmethod
+    def to_eng(raw: int) -> int:
+        return raw
+
+    @staticmethod
+    def from_eng(value: int) -> int:
+        return int(value)
+{%- endif %}
+
+{% endfor %}
+{% for t in m.texts %}
+
+class {{ t.class_name }}:
+    """ICD: {{ t.path }} [{{ t.icd_id }}]"""
+
+    CHARS = {{ t.chars }}
+    ENCODING = "{{ t.encoding }}"
+    LENGTH_MODE = "{{ t.length_mode }}"
+
+{% endfor %}

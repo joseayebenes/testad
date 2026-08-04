@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module:Module xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:Module="http://www.ads.org/model/Module"
+    xmlns:Data="http://www.ads.org/icdms/Data"
+    xmlns:IP="http://www.ads.org/icdms/IP"
+    id="_mod_broken" name="Broken_ICD">
+
+  <folder id="_f_bad" name="Bad">
+    <!-- señal sin longitud (error) -->
+    <data xsi:type="Data:Signal" id="_s_nolen" name="NoLength" coding="twoComplement"/>
+    <!-- señal sin codificación (aviso) -->
+    <data xsi:type="Data:Signal" id="_s_nocod" name="NoCoding" length="8"/>
+    <!-- id duplicado (error) -->
+    <data xsi:type="Data:Signal" id="_s_nocod" name="DupId" length="4" coding="BCD"/>
+    <!-- array sin contador, sin elemento y sin máximo (error + 2 avisos) -->
+    <data xsi:type="Data:VariableArray" id="_a_nocnt" name="NoCounter"/>
+    <!-- registro con campos solapados y un campo vacío -->
+    <data xsi:type="Data:Structure" id="_st_over" name="Overlap" length="32">
+      <dataField id="_df_a" name="a" w16="0" w16_b="0" with="_s_nocod"/>
+      <dataField id="_df_b" name="b" w16="0" w16_b="0" with="_s_nocod"/>
+      <dataField id="_df_empty" name="emptyField" w16="1" w16_b="0"/>
+    </data>
+    <!-- variante sin discriminador y con condición duplicada (2 errores) -->
+    <data xsi:type="Data:Header" id="_h_nokey" name="NoKey">
+      <isMember id="_m_1" keySelector="1" with="_st_over"/>
+      <isMember id="_m_2" keySelector="1" with="_st_over"/>
+    </data>
+    <!-- mensaje sin payload y periódico sin periodo (error + aviso) -->
+    <data xsi:type="Data:Message" id="_msg_nopay" name="NoPayload" rateMode="periodic"/>
+    <!-- mensaje con referencia rota (error tras resolver) -->
+    <data xsi:type="Data:Message" id="_msg_badref" name="BadRef" period="10" with="_missing_id"/>
+  </folder>
+
+  <!-- red vacía (aviso) -->
+  <IP:UDPNetwork id="_n_empty" name="EmptyNet"/>
+</Module:Module>

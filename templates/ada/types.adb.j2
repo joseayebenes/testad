@@ -1,0 +1,64 @@
+--  =======================================================================
+--  CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+--  Modulo ICD: {{ m.icd_name }} ({{ m.source_file }})
+--  Capa L1: cuerpos de las conversiones de escalado.
+--  =======================================================================
+
+package body {{ m.root_pkg }}.Types is
+
+{% for s in m.scalars %}
+{% if s.kind == "linear" %}
+   function To_Eng (Raw : {{ s.raw_type }}) return Float is
+   begin
+      return Float (Raw) * {{ s.lsb }} + {{ s.offset }};
+   end To_Eng;
+
+   function From_Eng (Value : Float) return {{ s.raw_type }} is
+   begin
+      return {{ s.raw_type }} (Float'Rounding ((Value - {{ s.offset }}) / {{ s.lsb }}));
+   end From_Eng;
+
+{% elif s.kind == "enum" %}
+   function To_Eng (Raw : {{ s.raw_type }}) return {{ s.eng_type }} is
+   begin
+      case Raw is
+{% for lit, v in s.literals %}         when {{ v }} => return {{ lit }};
+{% endfor %}         when others => raise Constraint_Error;
+      end case;
+   end To_Eng;
+
+   function From_Eng (Value : {{ s.eng_type }}) return {{ s.raw_type }} is
+   begin
+      case Value is
+{% for lit, v in s.literals %}         when {{ lit }} => return {{ v }};
+{% endfor %}      end case;
+   end From_Eng;
+
+{% elif s.kind == "lut" %}
+   function To_Eng (Raw : {{ s.raw_type }}) return Float is
+   begin
+{% for b, e, l, o in s.ranges %}
+      if Float (Raw) >= {{ b }} and then Float (Raw) <= {{ e }} then
+         return Float (Raw) * {{ l }} + {{ o }};
+      end if;
+{% endfor %}
+      raise Constraint_Error;
+   end To_Eng;
+
+   function From_Eng (Value : Float) return {{ s.raw_type }} is
+      R : Float;
+   begin
+{% for b, e, l, o in s.ranges %}
+{% if l != "0.0" %}
+      R := (Value - {{ o }}) / {{ l }};
+      if R >= {{ b }} and then R <= {{ e }} then
+         return {{ s.raw_type }} (Float'Rounding (R));
+      end if;
+{% endif %}
+{% endfor %}
+      raise Constraint_Error;
+   end From_Eng;
+
+{% endif %}
+{% endfor %}
+end {{ m.root_pkg }}.Types;

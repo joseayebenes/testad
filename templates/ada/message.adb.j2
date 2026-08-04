@@ -1,0 +1,42 @@
+--  =======================================================================
+--  CODIGO GENERADO AUTOMATICAMENTE POR ICDMS - NO EDITAR A MANO
+--  Modulo ICD: {{ m.icd_name }} ({{ m.source_file }})
+--  Capa L3: cuerpo de Encode/Decode. {{ f.doc }}
+--  =======================================================================
+
+{% if f.classes %}with Interfaces;
+
+{% endif %}package body {{ f.package_name }} is
+
+{% for c in f.classes %}
+   procedure Pack (Item : {{ c.type_name }};
+                   Data : in out ICD_Bitio.Byte_Array;
+                   Base : Natural) is
+   begin
+{% for s in c.pack_stmts %}      {{ s }}
+{% else %}      null;
+{% endfor %}   end Pack;
+
+   procedure Unpack (Item : out {{ c.type_name }};
+                     Data : ICD_Bitio.Byte_Array;
+                     Base : Natural) is
+   begin
+{% for s in c.unpack_stmts %}      {{ s }}
+{% else %}      null;
+{% endfor %}   end Unpack;
+
+{% endfor %}
+   procedure Encode (Item : {{ f.message.payload_ref }};
+                     Data : out Message_Bytes) is
+   begin
+      Data := (others => 0);
+      {{ f.message.payload_pack }}Pack (Item, Data, 0);
+   end Encode;
+
+   procedure Decode (Data : Message_Bytes;
+                     Item : out {{ f.message.payload_ref }}) is
+   begin
+      {{ f.message.payload_pack }}Unpack (Item, Data, 0);
+   end Decode;
+
+end {{ f.package_name }};
